@@ -12,6 +12,7 @@ let package = Package(
         .target(name: "MetrSystem", dependencies: ["MetrCore"]),
         .target(name: "MetrRender", dependencies: ["MetrCore"]),
         .testTarget(name: "MetrCoreTests", dependencies: ["MetrCore"]),
+        .testTarget(name: "MetrSystemTests", dependencies: ["MetrSystem", "MetrCore"]),
         .testTarget(name: "MetrRenderTests", dependencies: ["MetrRender"]),
     ],
     swiftLanguageModes: [.v6]

@@ -40,4 +40,31 @@ import Testing
         #expect(CPUMath.usage(previous: a, current: b) == nil)
         #expect(CPUMath.usage(previous: [], current: []) == nil)
     }
+
+    @Test func coreCountChangeReturnsNil() {
+        let eight = Array(repeating: CPUTicks(user: 0, system: 0, idle: 0, nice: 0), count: 8)
+        let ten = Array(repeating: CPUTicks(user: 5, system: 5, idle: 5, nice: 5), count: 10)
+        #expect(CPUMath.usage(previous: eight, current: ten) == nil)
+    }
+
+    @Test func allIdleDeltaIsZero() throws {
+        let previous = [CPUTicks(user: 1, system: 1, idle: 1, nice: 1)]
+        let current = [CPUTicks(user: 1, system: 1, idle: 101, nice: 1)]
+        let reading = try #require(CPUMath.usage(previous: previous, current: current))
+        #expect(reading.total == 0.0)
+    }
+
+    @Test func allBusyDeltaIsOne() throws {
+        let previous = [CPUTicks(user: 0, system: 0, idle: 7, nice: 0)]
+        let current = [CPUTicks(user: 60, system: 40, idle: 7, nice: 0)]
+        let reading = try #require(CPUMath.usage(previous: previous, current: current))
+        #expect(reading.total == 1.0)
+    }
+
+    @Test func niceTicksCountAsBusy() throws {
+        let previous = [CPUTicks(user: 0, system: 0, idle: 0, nice: 0)]
+        let current = [CPUTicks(user: 0, system: 0, idle: 50, nice: 50)]
+        let reading = try #require(CPUMath.usage(previous: previous, current: current))
+        #expect(abs(reading.total - 0.5) < 1e-9)
+    }
 }
