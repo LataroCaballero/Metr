@@ -7,7 +7,7 @@ import MetrSystem
 // system's own tools. Not part of the MetrKit library product, never linked into the app.
 
 func usage() -> Never {
-    FileHandle.standardError.write(Data("usage: metr-probe memory\n".utf8))
+    FileHandle.standardError.write(Data("usage: metr-probe memory|disk\n".utf8))
     exit(64)
 }
 
@@ -30,6 +30,12 @@ case "memory":
     print(
         "memory used=\(m.usedBytes) total=\(m.totalBytes) swap=\(m.swapUsedBytes) "
             + "freePercent=\(m.freePercent) pressure=\(rawPressure) pageSize=\(pageSize)"
+    )
+case "disk":
+    guard case .value(let d) = DiskCollector().sample() else { fail("disk reading unavailable") }
+    print(
+        "disk total=\(d.totalBytes) available=\(d.availableBytes) "
+            + "usedFraction=\(String(format: "%.4f", d.usedFraction))"
     )
 default:
     usage()

@@ -39,9 +39,9 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     /// Rebuilds the glyph from the store. Pending or unavailable readings give nil,
     /// so the ring stays a track and never an arc. The CPU ring never tints (D-02).
-    /// The memory ring is pressure (D-01). Disk has no reading yet, so it draws a track only.
+    /// The memory ring is pressure (D-01); the disk ring is the used fraction (D-03).
     func refresh() {
-        let state = GlyphState(cpu: store.cpu.value?.total, memory: store.memory.value?.ringFill, disk: nil)
+        let state = GlyphState(cpu: store.cpu.value?.total, memory: store.memory.value?.ringFill, disk: store.disk.value?.usedFraction)
         statusItem.button?.image = RingGlyph.image(for: state)
     }
 

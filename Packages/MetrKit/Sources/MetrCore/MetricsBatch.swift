@@ -15,15 +15,18 @@ public enum Reading<Value: Sendable & Equatable>: Sendable, Equatable {
 public struct MetricsBatch: Sendable, Equatable {
     public var cpu: Reading<CPUReading>?
     public var memory: Reading<MemoryReading>?
+    public var disk: Reading<DiskReading>?
     public var elapsed: Double
 
     public init(
         cpu: Reading<CPUReading>? = nil,
         memory: Reading<MemoryReading>? = nil,
+        disk: Reading<DiskReading>? = nil,
         elapsed: Double
     ) {
         self.cpu = cpu
         self.memory = memory
+        self.disk = disk
         self.elapsed = elapsed
     }
 }

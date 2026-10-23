@@ -6,13 +6,14 @@ import MetrCore
 /// (and through it the single `TickSource`) and the collectors; emits immutable `MetricsBatch`
 /// values to a `@Sendable` sink.
 public final class MetricsSampler: @unchecked Sendable {
-    /// Metrics this build has collectors for. Disk joins in Task 2 of Plan 01-04.
-    private static let supported: Set<Metric> = [.cpu, .memory]
+    /// Metrics this build has collectors for.
+    private static let supported: Set<Metric> = [.cpu, .memory, .disk]
 
     private let queue = DispatchQueue(label: "Metr.sampler", qos: .utility)
     private let scheduler: SamplingScheduler
     private let cpu = CPUCollector()  // confined to `queue`
     private let memory = MemoryCollector()  // confined to `queue`
+    private let disk = DiskCollector()  // confined to `queue`
     private var registry = DemandRegistry()  // confined to `queue`
     private var diagnostics: (@Sendable (String) -> Void)?  // confined to `queue`
 
@@ -41,6 +42,7 @@ public final class MetricsSampler: @unchecked Sendable {
             var batch = MetricsBatch(elapsed: elapsed)
             if sampled.contains(.cpu) { batch.cpu = cpu.sample() }
             if sampled.contains(.memory) { batch.memory = memory.sample() }
+            if sampled.contains(.disk) { batch.disk = disk.sample() }
             onBatch(batch)
         }
     }
