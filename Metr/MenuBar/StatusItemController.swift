@@ -1,4 +1,5 @@
 import AppKit
+import MetrCore
 import MetrRender
 import SwiftUI
 
@@ -7,14 +8,16 @@ import SwiftUI
 final class StatusItemController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
+    private let store: MetricsStore
 
-    override init() {
+    init(store: MetricsStore) {
+        self.store = store
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.autosaveName = "MetrStatusItem"
 
         popover = NSPopover()
         popover.behavior = .transient
-        let hosting = NSHostingController(rootView: PanelView())
+        let hosting = NSHostingController(rootView: PanelView(store: store))
         hosting.sizingOptions = .preferredContentSize
         popover.contentViewController = hosting
 
@@ -27,13 +30,16 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             button.action = #selector(togglePanel(_:))
             button.sendAction(on: [.leftMouseUp])
         }
+        store.didApply = { [weak self] in self?.refresh() }
         refresh()
     }
 
-    /// Reassigns the glyph. Plan 01-02 builds the state from the store;
-    /// until then no ring has a reading, so only the three tracks show.
+    /// Rebuilds the glyph from the store. Pending or unavailable readings give nil,
+    /// so the ring stays a track and never an arc. The CPU ring never tints (D-02).
+    /// Memory and disk have no reading yet, so they draw tracks only.
     func refresh() {
-        statusItem.button?.image = RingGlyph.image(for: GlyphState(cpu: nil, memory: nil, disk: nil))
+        let state = GlyphState(cpu: store.cpu.value?.total, memory: nil, disk: nil)
+        statusItem.button?.image = RingGlyph.image(for: state)
     }
 
     @objc func togglePanel(_ sender: Any?) {

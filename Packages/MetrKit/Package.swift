@@ -5,12 +5,13 @@ let package = Package(
     name: "MetrKit",
     platforms: [.macOS("26.0")],
     products: [
-        // Plan 01-02 adds MetrCore and MetrSystem to this product.
-        .library(name: "MetrKit", targets: ["MetrRender"])
+        .library(name: "MetrKit", targets: ["MetrCore", "MetrSystem", "MetrRender"])
     ],
     targets: [
-        // Plan 01-02 makes MetrRender depend on MetrCore.
-        .target(name: "MetrRender"),
+        .target(name: "MetrCore"),
+        .target(name: "MetrSystem", dependencies: ["MetrCore"]),
+        .target(name: "MetrRender", dependencies: ["MetrCore"]),
+        .testTarget(name: "MetrCoreTests", dependencies: ["MetrCore"]),
         .testTarget(name: "MetrRenderTests", dependencies: ["MetrRender"]),
     ],
     swiftLanguageModes: [.v6]
