@@ -137,7 +137,7 @@ soak_release() {
   SOAK_APP_PID="$pid"
 
   local sig cdhash
-  sig="$(codesign -dv "$METR_APP_RELEASE" 2>&1 || true)"
+  sig="$(codesign -dvvv "$METR_APP_RELEASE" 2>&1 || true)"
   cdhash="$(printf '%s\n' "$sig" | sed -n 's/^CDHash=//p' | head -n 1)"
   echo "SOAK START pid=$pid cdhash=$cdhash at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
