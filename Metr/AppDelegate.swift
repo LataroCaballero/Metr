@@ -7,6 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     private var sampler: MetricsSampler?
     private var lifecycleMonitor: SystemLifecycleMonitor?
+    /// Strong reference so the welcome window outlives the launch method (D-14).
+    private var welcomeController: WelcomeWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
@@ -26,6 +28,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let monitor = SystemLifecycleMonitor(sampler: sampler)
         lifecycleMonitor = monitor
         monitor.start()
+        presentWelcomeIfFirstLaunch()
+    }
+
+    /// The only place the welcome window is ever presented (D-15): the gate admits one claim per
+    /// preferences domain, and the flag is written at claim time so a crash cannot repeat it.
+    private func presentWelcomeIfFirstLaunch() {
+        guard FirstRunGate().claimWelcomePresentation() else { return }
+        let controller = WelcomeWindowController()
+        welcomeController = controller
+        controller.present()
     }
 
     /// The sink the sampler calls on its own queue. It must be built in a nonisolated context:

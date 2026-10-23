@@ -276,6 +276,54 @@
           }
         }
       }
+    },
+    "Metr lives in your menu bar": {
+      "comment": "Welcome window headline",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metr vive en tu barra de menús"
+          }
+        }
+      }
+    },
+    "Click the rings for details": {
+      "comment": "Welcome window instruction under the rings preview",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Haz clic en los anillos para ver los detalles"
+          }
+        }
+      }
+    },
+    "Don't see them? Turn Metr on in System Settings › Menu Bar.": {
+      "comment": "Welcome window tip about the Menu Bar permission",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿No los ves? Activa Metr en Ajustes del Sistema › Barra de menús."
+          }
+        }
+      }
+    },
+    "Done": {
+      "comment": "Welcome window primary button",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listo"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
