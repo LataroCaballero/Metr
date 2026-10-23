@@ -6,7 +6,7 @@ import SwiftUI
 
 /// Owns the single menu bar item and its popover (D-04).
 @MainActor
-final class StatusItemController: NSObject, NSPopoverDelegate {
+final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, RightClickMenuActions {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let store: MetricsStore
@@ -22,6 +22,15 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     /// Held for the app lifetime; the controller is never deallocated while the app runs.
     private var contrastObserver: (any NSObjectProtocol)?
 
+    /// Rejects an open request that arrives right after a close, so a click on the rings while the
+    /// panel is open closes it without reopening it (RESEARCH A8).
+    private var toggleGuard = PopoverToggleGuard()
+    /// True while a click is waiting for the first readings (cold start, at most `coldStartWait`).
+    private var pendingOpen = false
+    /// Identifies the current pending open, so a stale deadline cannot complete a newer one.
+    private var pendingOpenToken = 0
+    private static let coldStartWait: TimeInterval = 1.5
+
     init(store: MetricsStore, sampler: MetricsSampler) {
         self.store = store
         self.sampler = sampler
@@ -30,21 +39,28 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
         popover = NSPopover()
         popover.behavior = .transient
-        let hosting = NSHostingController(rootView: PanelView(store: store))
+        let hosting = PanelHostingController(rootView: PanelView(store: store))
         hosting.sizingOptions = .preferredContentSize
         popover.contentViewController = hosting
 
         super.init()
 
         popover.delegate = self
+        // Esc closes the panel by two paths: the responder chain (cancelOperation) and the
+        // SwiftUI exit command inside the view.
+        hosting.onCancel = { [weak self] in self?.popover.performClose(nil) }
+        hosting.rootView = PanelView(store: store, onClose: { [weak self] in self?.popover.performClose(nil) })
 
         if let button = statusItem.button {
             button.target = self
-            button.action = #selector(togglePanel(_:))
-            button.sendAction(on: [.leftMouseUp])
+            button.action = #selector(statusItemClicked(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.setAccessibilityLabel("Metr")
         }
-        store.didApply = { [weak self] in self?.refresh() }
+        store.didApply = { [weak self] in
+            self?.refresh()
+            self?.completePendingOpenIfReady()
+        }
 
         // The tinted (non-template) glyph bakes in the resolved label colour, so it must be
         // redrawn when the button's appearance changes (D-07).
@@ -120,14 +136,86 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             + " template=\(state.isTinted ? 0 : 1)"
     }
 
-    @objc func togglePanel(_ sender: Any?) {
+    /// Routes the click: right or control-click shows the menu, a left click toggles the panel.
+    @objc func statusItemClicked(_ sender: Any?) {
+        let event = NSApp.currentEvent
+        let isRightClick = event?.type == .rightMouseUp
+            || (event?.type == .leftMouseUp && event?.modifierFlags.contains(.control) == true)
+        if isRightClick {
+            showMenu()
+        } else {
+            togglePanel()
+        }
+    }
+
+    private func togglePanel() {
         if popover.isShown {
-            popover.performClose(sender)
+            popover.performClose(nil)
+        } else if pendingOpen {
+            // A second click while waiting for data cancels the pending open.
+            pendingOpen = false
+        } else if toggleGuard.shouldOpen(at: ProcessInfo.processInfo.systemUptime) {
+            openPanel()
+        }
+    }
+
+    /// Shows the panel now when every metric has answered, otherwise waits for the first ready
+    /// batch or `coldStartWait`, whichever comes first. The wait is a timer, never a block, and the
+    /// panel shows an em dash for anything still missing (never 0 and never a spinner).
+    private func openPanel() {
+        if store.isReadyForPanel {
+            showPanel()
             return
         }
-        guard let button = statusItem.button else { return }
+        pendingOpen = true
+        pendingOpenToken += 1
+        let token = pendingOpenToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.coldStartWait) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.pendingOpen, self.pendingOpenToken == token else { return }
+                self.pendingOpen = false
+                self.showPanel()
+            }
+        }
+    }
+
+    private func completePendingOpenIfReady() {
+        guard pendingOpen, store.isReadyForPanel else { return }
+        pendingOpen = false
+        showPanel()
+    }
+
+    private func showPanel() {
+        guard !popover.isShown, let button = statusItem.button else { return }
         NSApp.activate()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+
+    /// Temporarily assigns the menu so the button presents it, then clears it in `menuDidClose`
+    /// so left clicks keep reaching the action (RESEARCH A4).
+    private func showMenu() {
+        pendingOpen = false
+        if popover.isShown { popover.performClose(nil) }
+        guard let button = statusItem.button else { return }
+        let menu = RightClickMenu.make(target: self)
+        menu.delegate = self
+        statusItem.menu = menu
+        button.performClick(nil)
+    }
+
+    // MARK: RightClickMenuActions
+
+    @objc func showAbout(_ sender: Any?) {
+        RightClickMenu.showAbout()
+    }
+
+    // MARK: NSMenuDelegate
+
+    func menuDidClose(_ menu: NSMenu) {
+        // Clear on the next turn: the chosen item's action is delivered after this callback.
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.statusItem.menu = nil }
+        }
     }
 
     // MARK: NSPopoverDelegate
@@ -138,7 +226,13 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         sampler.register(.panel)
     }
 
+    func popoverDidShow(_ notification: Notification) {
+        statusItem.button?.highlight(true)
+    }
+
     func popoverDidClose(_ notification: Notification) {
+        statusItem.button?.highlight(false)
+        toggleGuard.noteClosed(at: ProcessInfo.processInfo.systemUptime)
         sampler.cancel(.panel)
     }
 }

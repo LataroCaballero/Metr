@@ -7,6 +7,8 @@ import SwiftUI
 /// No custom background, material or glass: the Liquid Glass comes from NSPopover (CLAUDE.md).
 struct PanelView: View {
     let store: MetricsStore
+    /// Closes the panel. Called on Esc (`onExitCommand`); the default keeps `PanelView(store:)` compiling.
+    var onClose: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +27,7 @@ struct PanelView: View {
             .padding(.vertical, 16)
         }
         .frame(width: 320)
+        .onExitCommand { onClose() }
     }
 }
 

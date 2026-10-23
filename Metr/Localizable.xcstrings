@@ -109,6 +109,18 @@
         }
       }
     },
+    "About Metr": {
+      "comment": "Right-click menu item that opens the standard About panel",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Acerca de Metr"
+          }
+        }
+      }
+    },
     "Quit Metr": {
       "comment": "Panel footer button that quits the app",
       "extractionState": "manual",
