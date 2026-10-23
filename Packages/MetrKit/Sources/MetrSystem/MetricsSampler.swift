@@ -1,31 +1,86 @@
 import Dispatch
+import Foundation
 import MetrCore
 
-/// Queue-confined sampling pipeline. Owns one serial utility queue, one `TickSource`
-/// and the collectors; emits immutable `MetricsBatch` values to a `@Sendable` sink.
+/// Queue-confined sampling pipeline. Owns one serial utility queue, one `SamplingScheduler`
+/// (and through it the single `TickSource`) and the collectors; emits immutable `MetricsBatch`
+/// values to a `@Sendable` sink.
 public final class MetricsSampler: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "Metr.sampler", qos: .utility)
-    private let ticks: TickSource
-    private let cpu = CPUCollector()  // confined to `queue`
+    /// Metrics this build has collectors for. Plan 01-04 adds memory and disk.
+    private static let supported: Set<Metric> = [.cpu]
 
-    public init() {
-        ticks = TickSource(queue: queue)
+    private let queue = DispatchQueue(label: "Metr.sampler", qos: .utility)
+    private let scheduler: SamplingScheduler
+    private let cpu = CPUCollector()  // confined to `queue`
+    private var registry = DemandRegistry()  // confined to `queue`
+
+    public init(cadenceScale: Double = 1) {
+        scheduler = SamplingScheduler(queue: queue, cadenceScale: cadenceScale)
     }
 
-    /// Takes the CPU baseline, then ticks every 2 s. Plan 01-03 replaces the fixed
-    /// interval with the scheduler; the signature stays.
-    public func start(onBatch: @escaping @Sendable (MetricsBatch) -> Void) {
+    /// Starts the scheduler. `diagnostics` receives plain log lines (never user-facing).
+    public func start(
+        onBatch: @escaping @Sendable (MetricsBatch) -> Void,
+        diagnostics: (@Sendable (String) -> Void)? = nil
+    ) {
         queue.async {
             self.cpu.resetBaseline()
-            _ = self.cpu.sample()
+            self.scheduler.onPlanChange = { plan in
+                diagnostics?(Self.describe(plan))
+            }
         }
-        ticks.start(interval: 2.0) { [self] dt in
-            // Runs on `queue` (the timer's queue); the collector is confined there.
-            onBatch(MetricsBatch(cpu: cpu.sample(), elapsed: dt))
+        scheduler.start { [self] due, elapsed, _ in
+            // Runs on `queue`; the collectors are confined there.
+            let sampled = due.intersection(Self.supported)
+            guard !sampled.isEmpty else { return }
+            diagnostics?(Self.describe(tick: elapsed, metrics: sampled))
+            var batch = MetricsBatch(elapsed: elapsed)
+            if sampled.contains(.cpu) { batch.cpu = cpu.sample() }
+            onBatch(batch)
         }
     }
 
     public func stop() {
-        ticks.stop()
+        scheduler.stop()
+    }
+
+    public func register(_ consumer: DemandConsumer) {
+        queue.async {
+            if self.registry.register(consumer) {
+                self.scheduler.setDemand(self.registry.active)
+            }
+        }
+    }
+
+    public func cancel(_ consumer: DemandConsumer) {
+        queue.async {
+            if self.registry.cancel(consumer) {
+                self.scheduler.setDemand(self.registry.active)
+            }
+        }
+    }
+
+    public func suspend(reason: SuspendReason) {
+        scheduler.suspend(reason: reason)
+    }
+
+    public func resume(reason: SuspendReason) {
+        scheduler.resume(reason: reason)
+    }
+
+    public func setConstrained(_ value: Bool) {
+        scheduler.setConstrained(value)
+    }
+
+    // MARK: Diagnostics (POSIX formatting)
+
+    private static func describe(_ plan: SamplingPlan) -> String {
+        let base = plan.baseInterval.map { String(format: "%.1f", $0) } ?? "none"
+        return "tier=\(plan.tier.rawValue) base=\(base) constrained=\(plan.constrained ? 1 : 0)"
+    }
+
+    private static func describe(tick elapsed: Double, metrics: Set<Metric>) -> String {
+        let list = Metric.allCases.filter(metrics.contains).map(\.rawValue).joined(separator: ",")
+        return "tick dt=\(String(format: "%.3f", elapsed)) metrics=\(list)"
     }
 }

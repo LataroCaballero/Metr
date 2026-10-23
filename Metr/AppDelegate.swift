@@ -10,10 +10,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let store = MetricsStore()
         self.store = store
-        statusItemController = StatusItemController(store: store)
-        let sampler = MetricsSampler()
+        let sampler = MetricsSampler(cadenceScale: DebugHooks.cadenceScale)
         self.sampler = sampler
-        sampler.start(onBatch: Self.makeBatchSink(store: store))
+        statusItemController = StatusItemController(store: store, sampler: sampler)
+        // Register BEFORE start so the first plan already reflects the override.
+        for consumer in DebugHooks.demandOverride { sampler.register(consumer) }
+        sampler.start(onBatch: Self.makeBatchSink(store: store), diagnostics: DebugHooks.diagnostics)
     }
 
     /// The sink the sampler calls on its own queue. It must be built in a nonisolated context:

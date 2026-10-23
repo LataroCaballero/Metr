@@ -1,6 +1,7 @@
 import AppKit
 import MetrCore
 import MetrRender
+import MetrSystem
 import SwiftUI
 
 /// Owns the single menu bar item and its popover (D-04).
@@ -9,9 +10,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let store: MetricsStore
+    private let sampler: MetricsSampler
 
-    init(store: MetricsStore) {
+    init(store: MetricsStore, sampler: MetricsSampler) {
         self.store = store
+        self.sampler = sampler
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.autosaveName = "MetrStatusItem"
 
@@ -50,5 +53,17 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         guard let button = statusItem.button else { return }
         NSApp.activate()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+
+    // MARK: NSPopoverDelegate
+
+    /// The only source of panel demand. Window occlusion is deliberately not used: it is
+    /// unreliable for status items (CLAUDE.md, macOS 27 forum reports).
+    func popoverWillShow(_ notification: Notification) {
+        sampler.register(.panel)
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        sampler.cancel(.panel)
     }
 }
