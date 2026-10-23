@@ -1,6 +1,9 @@
 import Foundation
 import MetrCore
 import Synchronization
+#if DEBUG
+import ServiceManagement
+#endif
 
 /// DEBUG-only log hook. In Release the body is empty and no environment-variable
 /// names exist in the binary (T-01-02).
@@ -69,6 +72,31 @@ nonisolated enum DebugHooks {
         return { line in DebugHooks.log(line) }
         #else
         return nil
+        #endif
+    }
+
+    /// Phase-4 spike (ROADMAP Phase 1 notes): what `SMAppService.mainApp` does for an ad-hoc signed
+    /// copy in /Applications. DEBUG only; `scripts/spikes/login-item.sh` drives it and cleans up.
+    /// METR_DEBUG_LOGIN_ITEM is `status` (read only), `register` or `unregister`. Logs
+    /// "loginitem op=<op> status=<raw> error=<text|none>"; raw status: 0 notRegistered, 1 enabled,
+    /// 2 requiresApproval, 3 notFound. Release: empty body, no environment name.
+    static func runLoginItemSpikeIfRequested() {
+        #if DEBUG
+        guard let op = ProcessInfo.processInfo.environment["METR_DEBUG_LOGIN_ITEM"], !op.isEmpty else { return }
+        let service = SMAppService.mainApp
+        var errorText = "none"
+        do {
+            switch op {
+            case "register": try service.register()
+            case "unregister": try service.unregister()
+            default: break
+            }
+        } catch {
+            let nsError = error as NSError
+            errorText = "\(nsError.domain)#\(nsError.code) \(nsError.localizedDescription)"
+                .replacingOccurrences(of: "\n", with: " ")
+        }
+        log("loginitem op=\(op) status=\(service.status.rawValue) error=\(errorText)")
         #endif
     }
 

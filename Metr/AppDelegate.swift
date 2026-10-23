@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var welcomeController: WelcomeWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DebugHooks.runLoginItemSpikeIfRequested()
         #if DEBUG
         if let directory = DebugHooks.renderDirectory {
             DebugSnapshotRenderer.renderAndExit(to: directory)
