@@ -5,8 +5,8 @@ import SwiftUI
 
 /// DEBUG-only: renders the panel fixtures to PNG files and exits, so a CLI run can review the
 /// layout in EN and ES, light and dark, without a click (T-01-13: writes only `panel-*.png`
-/// inside the directory it is given, and is compiled out of Release).
-/// The surface list is extensible; Plan 01-08 adds the welcome window.
+/// or `welcome-*.png` inside the directory it is given, and is compiled out of Release).
+/// Surfaces: the panel fixtures and the first-launch welcome window (default and fallback tip).
 @MainActor
 enum DebugSnapshotRenderer {
     private struct Fixture {
@@ -51,6 +51,15 @@ enum DebugSnapshotRenderer {
                 store.apply(fixture.batch)
                 let name = "panel-\(language)-\(fixture.name)-\(scheme == .dark ? "dark" : "light").png"
                 if write(PanelView(store: store), scheme: scheme, to: directory.appending(path: name)) {
+                    DebugHooks.log("rendered \(name)")
+                }
+            }
+        }
+        for (state, usedFallback) in [("default", false), ("fallback", true)] {
+            for scheme in [ColorScheme.light, .dark] {
+                let name = "welcome-\(language)-\(state)-\(scheme == .dark ? "dark" : "light").png"
+                let view = WelcomeView(onDone: {}, usedFallback: usedFallback)
+                if write(view, scheme: scheme, to: directory.appending(path: name)) {
                     DebugHooks.log("rendered \(name)")
                 }
             }

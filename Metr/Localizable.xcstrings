@@ -324,6 +324,30 @@
           }
         }
       }
+    },
+    "Open Menu Bar Settings": {
+      "comment": "Welcome window secondary button that opens System Settings",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir ajustes de la Barra de menús"
+          }
+        }
+      }
+    },
+    "Open System Settings, go to Menu Bar, and turn Metr on.": {
+      "comment": "Welcome window tip shown after the Settings deep link could not land on the Menu Bar pane",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abre Ajustes del Sistema, ve a Barra de menús y activa Metr."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
