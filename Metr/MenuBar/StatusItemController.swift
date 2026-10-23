@@ -37,19 +37,14 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.autosaveName = "MetrStatusItem"
 
+        // The popover has no content while it is closed: `showPanel()` installs a fresh hosting
+        // controller and `popoverDidClose` removes it (FND-03, see `makePanelContent`).
         popover = NSPopover()
         popover.behavior = .transient
-        let hosting = PanelHostingController(rootView: PanelView(store: store))
-        hosting.sizingOptions = .preferredContentSize
-        popover.contentViewController = hosting
 
         super.init()
 
         popover.delegate = self
-        // Esc closes the panel by two paths: the responder chain (cancelOperation) and the
-        // SwiftUI exit command inside the view.
-        hosting.onCancel = { [weak self] in self?.popover.performClose(nil) }
-        hosting.rootView = PanelView(store: store, onClose: { [weak self] in self?.popover.performClose(nil) })
 
         if let button = statusItem.button {
             button.target = self
@@ -185,8 +180,24 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
         showPanel()
     }
 
+    /// Builds the panel content for one presentation. SwiftUI content that stays alive inside a
+    /// closed popover keeps observing the store and re-rendering on every tick, with its 0.4 s
+    /// numeric-text animations driven by a window that is never on screen. That settled into a
+    /// layout loop at about 60 Hz with a growing footprint (about 6 % of a core and 100 MB seen in
+    /// the first 300 s idle measurement, FND-03). So the content exists only while the panel is shown.
+    private func makePanelContent() -> PanelHostingController {
+        let close: () -> Void = { [weak self] in self?.popover.performClose(nil) }
+        let hosting = PanelHostingController(rootView: PanelView(store: store, onClose: close))
+        hosting.sizingOptions = .preferredContentSize
+        // Esc closes the panel by two paths: the responder chain (cancelOperation) and the
+        // SwiftUI exit command inside the view.
+        hosting.onCancel = close
+        return hosting
+    }
+
     private func showPanel() {
         guard !popover.isShown, let button = statusItem.button else { return }
+        popover.contentViewController = makePanelContent()
         NSApp.activate()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
@@ -231,6 +242,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
     }
 
     func popoverDidClose(_ notification: Notification) {
+        popover.contentViewController = nil
         statusItem.button?.highlight(false)
         toggleGuard.noteClosed(at: ProcessInfo.processInfo.systemUptime)
         sampler.cancel(.panel)
