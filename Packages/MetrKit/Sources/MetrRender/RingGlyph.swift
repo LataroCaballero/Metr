@@ -37,14 +37,37 @@ public struct GlyphState: Sendable, Equatable {
 public enum RingGlyph {
     public static let size = NSSize(width: 56, height: 18)
 
-    // Artwork values from the UI-SPEC "Menu Bar Glyph Contract".
-    private static let radius: CGFloat = 7
-    private static let lineWidth: CGFloat = 2
-    private static let trackAlpha: CGFloat = 0.30
-    private static let trackAlphaIncreasedContrast: CGFloat = 0.50
-    private static let centerY: CGFloat = 9
+    /// Every artwork value in one place (UI-SPEC "Menu Bar Glyph Contract"). The only permitted
+    /// alternates, if the letters are soft at 1x, are diameter 14 (gap 5), stroke 1.5 and letter 7.
+    /// If the letters stay soft, set `drawsLetters` to false (bare rings) and flag it to the owner (D-06).
+    private struct Metrics {
+        static let diameter: CGFloat = 16
+        static let stroke: CGFloat = 2
+        static let letter: CGFloat = 8
+        static let gap: CGFloat = 4
+        /// D-06 fallback switch. Never flip it silently: report it in the SUMMARY.
+        static let drawsLetters = true
 
-    private static func centerX(forRing index: Int) -> CGFloat { 8 + 20 * CGFloat(index) }
+        static let trackAlpha: CGFloat = 0.30
+        static let trackAlphaIncreasedContrast: CGFloat = 0.50
+        static let centerY: CGFloat = 9
+        static let letters = ["C", "M", "D"]
+
+        /// Centre of the stroke, so the outer edge of the ring is `diameter`.
+        static var radius: CGFloat { (diameter - stroke) / 2 }
+        static var leadingPadding: CGFloat { (56 - (3 * diameter + 2 * gap)) / 2 }
+        static func centerX(forRing index: Int) -> CGFloat {
+            leadingPadding + diameter / 2 + (diameter + gap) * CGFloat(index)
+        }
+    }
+
+    private static var radius: CGFloat { Metrics.radius }
+    private static var lineWidth: CGFloat { Metrics.stroke }
+    private static var trackAlpha: CGFloat { Metrics.trackAlpha }
+    private static var trackAlphaIncreasedContrast: CGFloat { Metrics.trackAlphaIncreasedContrast }
+    private static var centerY: CGFloat { Metrics.centerY }
+
+    private static func centerX(forRing index: Int) -> CGFloat { Metrics.centerX(forRing: index) }
 
     /// Image for the status item button (D-07). With no ring tinted it is a template image, drawn
     /// in black so the system supplies the foreground colour. With a tint it is a regular image:
@@ -96,14 +119,26 @@ public enum RingGlyph {
         let tints: [RingTint] = [TintLogic.cpu(), state.memoryTint, state.diskTint]
         let track = state.increaseContrast ? trackAlphaIncreasedContrast : trackAlpha
         for index in fills.indices {
-            drawRing(
-                center: NSPoint(x: centerX(forRing: index), y: centerY),
-                fill: fills[index],
-                tint: tints[index],
-                neutral: neutral,
-                trackAlpha: track
-            )
+            let center = NSPoint(x: centerX(forRing: index), y: centerY)
+            drawRing(center: center, fill: fills[index], tint: tints[index], neutral: neutral, trackAlpha: track)
+            if Metrics.drawsLetters {
+                drawLetter(Metrics.letters[index], center: center, neutral: neutral)
+            }
         }
+    }
+
+    /// Letters are neutral elements (never tinted). Centred on cap height rather than the line box,
+    /// horizontally by measured width, with the origin snapped to whole device pixels.
+    private static func drawLetter(_ letter: String, center: NSPoint, neutral: NSColor) {
+        let font = NSFont.systemFont(ofSize: Metrics.letter, weight: .semibold)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: neutral]
+        let text = NSAttributedString(string: letter, attributes: attributes)
+        let width = text.size().width
+        let scale = NSGraphicsContext.current.map { $0.cgContext.userSpaceToDeviceSpaceTransform.a } ?? 1
+        func snap(_ value: CGFloat) -> CGFloat { (value * scale).rounded() / scale }
+        let baseline = snap(center.y - font.capHeight / 2)
+        let origin = NSPoint(x: snap(center.x - width / 2), y: baseline + font.descender)
+        text.draw(at: origin)
     }
 
     private static func arcColor(for tint: RingTint, neutral: NSColor) -> NSColor {

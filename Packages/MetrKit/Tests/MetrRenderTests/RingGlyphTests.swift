@@ -132,4 +132,81 @@ import Testing
         #expect(alphas.allSatisfy { abs($0 - alphas[0]) < 0.01 })
         #expect(alphas[0] > 0.95)
     }
+
+    // MARK: - Letters, contrast, previews (Task 2)
+
+    @Test func letterIsDrawnInsideRingZero() {
+        let rep = RingGlyph.bitmap(for: GlyphState(cpu: nil, memory: nil, disk: nil), scale: 2)
+        // Interior = within 4.5 pt of the centre (8, 9) pt. At 2x the centre is (16, 18) px from the top.
+        var opaque = 0
+        for y in 0..<rep.pixelsHigh {
+            for x in 0..<rep.pixelsWide {
+                let dx = Double(x) + 0.5 - 16
+                let dy = Double(y) + 0.5 - 18
+                if (dx * dx + dy * dy).squareRoot() <= 9, pixel(rep, x: x, y: y).a >= 0.5 { opaque += 1 }
+            }
+        }
+        #expect(opaque >= 10)
+    }
+
+    @Test func increaseContrastRaisesTrackAlpha() {
+        let normal = GlyphState(cpu: nil, memory: nil, disk: nil)
+        let contrast = GlyphState(cpu: nil, memory: nil, disk: nil, increaseContrast: true)
+        #expect(abs(pixel(RingGlyph.bitmap(for: normal, scale: 2), x: 16, y: 4).a - 0.30) <= 0.05)
+        #expect(abs(pixel(RingGlyph.bitmap(for: contrast, scale: 2), x: 16, y: 4).a - 0.50) <= 0.05)
+        // Also in the tinted path.
+        let tinted = GlyphState(cpu: nil, memory: nil, disk: nil, diskTint: .warning, increaseContrast: true)
+        #expect(abs(pixel(RingGlyph.bitmap(for: tinted, scale: 2), x: 16, y: 4).a - 0.50) <= 0.05)
+    }
+
+    @Test func writesPreviewsWhenAsked() throws {
+        guard let dir = ProcessInfo.processInfo.environment["METR_GLYPH_PREVIEW_DIR"], !dir.isEmpty else { return }
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let states: [(String, GlyphState)] = [
+            ("rest", GlyphState(cpu: 0.34, memory: 0.40, disk: 0.55)),
+            ("empty", GlyphState(cpu: nil, memory: nil, disk: nil)),
+            ("full", GlyphState(cpu: 1, memory: 1, disk: 1)),
+            ("memWarn", GlyphState(cpu: 0.34, memory: 0.70, disk: 0.55, memoryTint: .warning)),
+            ("memCritical", GlyphState(cpu: 0.34, memory: 0.90, disk: 0.55, memoryTint: .critical)),
+            ("diskWarn", GlyphState(cpu: 0.34, memory: 0.40, disk: 0.92, diskTint: .warning)),
+            ("diskCritical", GlyphState(cpu: 0.34, memory: 0.40, disk: 0.96, diskTint: .critical)),
+            ("contrast", GlyphState(cpu: 0.34, memory: 0.40, disk: 0.55, increaseContrast: true)),
+        ]
+        for (name, state) in states {
+            for scale in [1, 2] {
+                for dark in [false, true] {
+                    let neutral: NSColor = dark ? .white : .black
+                    let rep = RingGlyph.bitmap(for: state, scale: CGFloat(scale), neutral: neutral)
+                    let background: (Double, Double, Double) = dark ? (0.16, 0.16, 0.18) : (1, 1, 1)
+                    let png = try upscaledPNG(rep, background: background, pixelsPerPoint: 8, scale: scale)
+                    let file = "glyph-\(scale)x-\(dark ? "dark" : "light")-\(name).png"
+                    try png.write(to: URL(fileURLWithPath: dir).appendingPathComponent(file))
+                }
+            }
+        }
+    }
+
+    /// Composites over an opaque background and upscales with nearest-neighbour sampling.
+    private func upscaledPNG(
+        _ rep: NSBitmapImageRep, background: (Double, Double, Double), pixelsPerPoint: Int, scale: Int
+    ) throws -> Data {
+        let factor = pixelsPerPoint / scale
+        let out = try #require(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: rep.pixelsWide * factor, pixelsHigh: rep.pixelsHigh * factor,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        for y in 0..<out.pixelsHigh {
+            for x in 0..<out.pixelsWide {
+                let p = pixel(rep, x: x / factor, y: y / factor)
+                let color = NSColor(
+                    deviceRed: p.r * p.a + background.0 * (1 - p.a),
+                    green: p.g * p.a + background.1 * (1 - p.a),
+                    blue: p.b * p.a + background.2 * (1 - p.a),
+                    alpha: 1)
+                out.setColor(color, atX: x, y: y)
+            }
+        }
+        return try #require(out.representation(using: .png, properties: [:]))
+    }
 }
