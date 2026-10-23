@@ -19,6 +19,8 @@ public final class SamplingScheduler: @unchecked Sendable {
     private var lastDelivery: Double?
     private var onTick: TickHandler?
     private var started = false
+    /// True from a start/resume until the priming fire has been delivered.
+    private var primePending = false
 
     /// Called on the queue whenever the plan changes. Set before `start`.
     public var onPlanChange: (@Sendable (SamplingPlan) -> Void)?
@@ -39,8 +41,7 @@ public final class SamplingScheduler: @unchecked Sendable {
             self.started = true
             self.plan = self.makePlan()
             self.onPlanChange?(self.plan)
-            self.deliver(due: Set(Metric.allCases), elapsed: 0, priming: false)
-            self.startTimer()
+            self.beginRunning()
         }
     }
 
@@ -64,7 +65,7 @@ public final class SamplingScheduler: @unchecked Sendable {
         queue.async {
             self.suspendReasons.remove(reason)
             guard self.started else { return }
-            self.replan(restartTimer: true, deliverDue: false)
+            self.replan(restartTimer: true, deliverDue: false, prime: self.suspendReasons.isEmpty)
         }
     }
 
@@ -97,13 +98,18 @@ public final class SamplingScheduler: @unchecked Sendable {
     }
 
     /// Recomputes the plan; on a change publishes it and (re)schedules the timer.
-    private func replan(restartTimer: Bool, deliverDue: Bool) {
+    private func replan(restartTimer: Bool, deliverDue: Bool, prime: Bool = false) {
         let newPlan = makePlan()
         guard newPlan != plan else { return }
         plan = newPlan
         onPlanChange?(plan)
         guard plan.baseInterval != nil else {
+            primePending = false
             ticks.stop()
+            return
+        }
+        if prime {
+            beginRunning()
             return
         }
         if restartTimer { startTimer() }
@@ -116,15 +122,38 @@ public final class SamplingScheduler: @unchecked Sendable {
         }
     }
 
+    /// Start or resume: an immediate all-metrics tick takes the baselines, then a short
+    /// priming fire (cpu only) delivers the first real CPU delta before the normal cadence.
+    private func beginRunning() {
+        primePending = true
+        deliver(due: Set(Metric.allCases), elapsed: 0, priming: false)
+        startTimer()
+    }
+
     private func startTimer() {
         guard let base = plan.baseInterval else { return }
-        ticks.start(interval: base) { [self] dt in
-            fire(dt: dt)
+        if primePending {
+            // The priming fire is a one-shot on its own short timer: TickSource scales leeway by
+            // the interval, so reusing the 2 s idle timer would let it slip by up to 0.4 s.
+            // The first fire restarts the timer at the tier's base interval.
+            ticks.start(interval: SamplingPlan.primingDelay * plan.cadenceScale) { [self] dt in
+                fire(dt: dt)
+            }
+        } else {
+            ticks.start(interval: base) { [self] dt in
+                fire(dt: dt)
+            }
         }
     }
 
     private func fire(dt: Double) {
         guard started, suspendReasons.isEmpty, plan.baseInterval != nil else { return }
+        if primePending {
+            primePending = false
+            deliver(due: [.cpu], elapsed: dt, priming: true)
+            startTimer()
+            return
+        }
         let due = plan.dueMetrics(now: Self.uptime(), lastSampled: lastSampled)
         guard !due.isEmpty else { return }
         deliver(due: due, elapsed: dt, priming: false)

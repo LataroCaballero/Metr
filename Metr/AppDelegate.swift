@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: MetricsStore?
     private var statusItemController: StatusItemController?
     private var sampler: MetricsSampler?
+    private var lifecycleMonitor: SystemLifecycleMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let store = MetricsStore()
@@ -16,6 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Register BEFORE start so the first plan already reflects the override.
         for consumer in DebugHooks.demandOverride { sampler.register(consumer) }
         sampler.start(onBatch: Self.makeBatchSink(store: store), diagnostics: DebugHooks.diagnostics)
+        let monitor = SystemLifecycleMonitor(sampler: sampler)
+        lifecycleMonitor = monitor
+        monitor.start()
     }
 
     /// The sink the sampler calls on its own queue. It must be built in a nonisolated context:

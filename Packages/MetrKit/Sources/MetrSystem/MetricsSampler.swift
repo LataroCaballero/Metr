@@ -13,6 +13,7 @@ public final class MetricsSampler: @unchecked Sendable {
     private let scheduler: SamplingScheduler
     private let cpu = CPUCollector()  // confined to `queue`
     private var registry = DemandRegistry()  // confined to `queue`
+    private var diagnostics: (@Sendable (String) -> Void)?  // confined to `queue`
 
     public init(cadenceScale: Double = 1) {
         scheduler = SamplingScheduler(queue: queue, cadenceScale: cadenceScale)
@@ -24,15 +25,17 @@ public final class MetricsSampler: @unchecked Sendable {
         diagnostics: (@Sendable (String) -> Void)? = nil
     ) {
         queue.async {
+            self.diagnostics = diagnostics
             self.cpu.resetBaseline()
             self.scheduler.onPlanChange = { plan in
                 diagnostics?(Self.describe(plan))
             }
         }
-        scheduler.start { [self] due, elapsed, _ in
+        scheduler.start { [self] due, elapsed, priming in
             // Runs on `queue`; the collectors are confined there.
             let sampled = due.intersection(Self.supported)
             guard !sampled.isEmpty else { return }
+            if priming { diagnostics?("prime") }
             diagnostics?(Self.describe(tick: elapsed, metrics: sampled))
             var batch = MetricsBatch(elapsed: elapsed)
             if sampled.contains(.cpu) { batch.cpu = cpu.sample() }
@@ -61,11 +64,20 @@ public final class MetricsSampler: @unchecked Sendable {
     }
 
     public func suspend(reason: SuspendReason) {
-        scheduler.suspend(reason: reason)
+        queue.async {
+            self.diagnostics?("suspend reason=\(reason.rawValue)")
+            self.scheduler.suspend(reason: reason)
+        }
     }
 
+    /// Resets the CPU baseline first: a delta across a suspension would be a spike.
+    /// The scheduler then takes a fresh baseline tick and primes.
     public func resume(reason: SuspendReason) {
-        scheduler.resume(reason: reason)
+        queue.async {
+            self.diagnostics?("resume reason=\(reason.rawValue)")
+            self.cpu.resetBaseline()
+            self.scheduler.resume(reason: reason)
+        }
     }
 
     public func setConstrained(_ value: Bool) {

@@ -13,7 +13,13 @@ final class MetricsStore {
 
     func apply(_ batch: MetricsBatch) {
         if let reading = batch.cpu {
-            cpu = reading
+            // A baseline-only sample after launch or wake is .pending: keep the last real
+            // value until the primed one arrives, so the ring never flashes to a track.
+            if reading == .pending, cpu.value != nil {
+                // keep
+            } else {
+                cpu = reading
+            }
         }
         didApply?()
         DebugHooks.log(Self.describe(cpu))
