@@ -156,6 +156,114 @@
           }
         }
       }
+    },
+    "CPU: %@": {
+      "comment": "Tooltip line for processor load",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU: %@"
+          }
+        }
+      }
+    },
+    "Memory: Normal pressure · %@ of %@": {
+      "comment": "Tooltip memory line, normal pressure: used of total",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memoria: presión normal · %1$@ de %2$@"
+          }
+        }
+      }
+    },
+    "Memory: Elevated pressure · %@ of %@": {
+      "comment": "Tooltip memory line, elevated pressure: used of total",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memoria: presión elevada · %1$@ de %2$@"
+          }
+        }
+      }
+    },
+    "Memory: Critical pressure · %@ of %@": {
+      "comment": "Tooltip memory line, critical pressure: used of total",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memoria: presión crítica · %1$@ de %2$@"
+          }
+        }
+      }
+    },
+    " · Swap %@": {
+      "comment": "Tooltip suffix appended to the memory line only when swap is in use",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " · Swap %@"
+          }
+        }
+      }
+    },
+    "Disk: %@ free of %@": {
+      "comment": "Tooltip disk line: free amount of total",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disco: %1$@ libres de %2$@"
+          }
+        }
+      }
+    },
+    "CPU: unavailable": {
+      "comment": "Tooltip line when the CPU read failed",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU: no disponible"
+          }
+        }
+      }
+    },
+    "Memory: unavailable": {
+      "comment": "Tooltip line when the memory read failed",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memoria: no disponible"
+          }
+        }
+      }
+    },
+    "Disk: unavailable": {
+      "comment": "Tooltip line when the disk read failed",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disco: no disponible"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

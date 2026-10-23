@@ -14,6 +14,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     /// Last state assigned to the button. The image is rebuilt only when this changes (T-01-20).
     private var lastAssigned: GlyphState?
+    /// Builds the three-line hover tooltip from the store (D-11 through D-13).
+    private let tooltipComposer = TooltipComposer(templates: .app(), text: MetricText(locale: .current))
+    /// Last tooltip assigned to the button, so it is reassigned only when the text changed.
+    private var lastTooltip: String?
     private var appearanceObservation: NSKeyValueObservation?
     /// Held for the app lifetime; the controller is never deallocated while the app runs.
     private var contrastObserver: (any NSObjectProtocol)?
@@ -38,6 +42,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             button.target = self
             button.action = #selector(togglePanel(_:))
             button.sendAction(on: [.leftMouseUp])
+            button.setAccessibilityLabel("Metr")
         }
         store.didApply = { [weak self] in self?.refresh() }
 
@@ -61,6 +66,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     /// give nil, so the ring stays a track and never an arc. The CPU ring never tints (D-02); the
     /// memory ring is pressure (D-01); the disk ring is the used fraction, tinted by free space (D-03).
     func refresh(force: Bool = false) {
+        updateTooltip()
         let state = GlyphState(
             cpu: RingQuantizer.quantize(store.cpu.value?.total),
             memory: RingQuantizer.quantize(store.memory.value?.ringFill),
@@ -73,6 +79,21 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         lastAssigned = state
         statusItem.button?.image = RingGlyph.image(for: state, neutral: resolvedNeutral())
         DebugHooks.log(Self.describe(state))
+    }
+
+    /// Recomposes the tooltip on every applied tick and assigns it only when it changed. While any
+    /// metric is still pending the result is nil and the button keeps no tooltip. The accessibility
+    /// value carries the same three lines on one line (D-13).
+    private func updateTooltip() {
+        let tooltip = tooltipComposer.compose(cpu: store.cpu, memory: store.memory, disk: store.disk)
+        guard tooltip != lastTooltip else { return }
+        lastTooltip = tooltip
+        guard let button = statusItem.button else { return }
+        button.toolTip = tooltip
+        button.setAccessibilityValue(tooltip.map(TooltipComposer.accessibilityValue(for:)))
+        if let tooltip {
+            DebugHooks.log("tooltip=" + tooltip.replacingOccurrences(of: "\n", with: " | "))
+        }
     }
 
     /// The button's label colour as a concrete sRGB colour, resolved in its own appearance.
