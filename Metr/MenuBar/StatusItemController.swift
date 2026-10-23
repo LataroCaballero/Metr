@@ -12,6 +12,14 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let store: MetricsStore
     private let sampler: MetricsSampler
 
+    /// Last state assigned to the button. The image is rebuilt only when this changes (T-01-20).
+    private var lastAssigned: GlyphState?
+    /// Last disk tint, the `previous` input of the D-03 hysteresis.
+    private var diskTint: RingTint = .none
+    private var appearanceObservation: NSKeyValueObservation?
+    /// Held for the app lifetime; the controller is never deallocated while the app runs.
+    private var contrastObserver: (any NSObjectProtocol)?
+
     init(store: MetricsStore, sampler: MetricsSampler) {
         self.store = store
         self.sampler = sampler
@@ -34,15 +42,64 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             button.sendAction(on: [.leftMouseUp])
         }
         store.didApply = { [weak self] in self?.refresh() }
+
+        // The tinted (non-template) glyph bakes in the resolved label colour, so it must be
+        // redrawn when the button's appearance changes (D-07).
+        appearanceObservation = statusItem.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
+            Task { @MainActor [weak self] in self?.refresh(force: true) }
+        }
+        contrastObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh(force: true) }
+        }
         refresh()
     }
 
-    /// Rebuilds the glyph from the store. Pending or unavailable readings give nil,
-    /// so the ring stays a track and never an arc. The CPU ring never tints (D-02).
-    /// The memory ring is pressure (D-01); the disk ring is the used fraction (D-03).
-    func refresh() {
-        let state = GlyphState(cpu: store.cpu.value?.total, memory: store.memory.value?.ringFill, disk: store.disk.value?.usedFraction)
-        statusItem.button?.image = RingGlyph.image(for: state)
+    /// Rebuilds the glyph state from the store and reassigns `button.image` only when it changed
+    /// (or `force` is set after an appearance or contrast change). Pending or unavailable readings
+    /// give nil, so the ring stays a track and never an arc. The CPU ring never tints (D-02); the
+    /// memory ring is pressure (D-01); the disk ring is the used fraction, tinted by free space (D-03).
+    func refresh(force: Bool = false) {
+        diskTint = TintLogic.disk(freeFraction: store.disk.value?.freeFraction, previous: diskTint)
+        let state = GlyphState(
+            cpu: RingQuantizer.quantize(store.cpu.value?.total),
+            memory: RingQuantizer.quantize(store.memory.value?.ringFill),
+            disk: RingQuantizer.quantize(store.disk.value?.usedFraction),
+            memoryTint: TintLogic.memory(store.memory.value?.pressure),
+            diskTint: diskTint,
+            increaseContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        )
+        guard force || state != lastAssigned else { return }
+        lastAssigned = state
+        statusItem.button?.image = RingGlyph.image(for: state, neutral: resolvedNeutral())
+        DebugHooks.log(Self.describe(state))
+    }
+
+    /// The button's label colour as a concrete sRGB colour, resolved in its own appearance.
+    private func resolvedNeutral() -> NSColor {
+        var resolved = NSColor.black
+        let appearance = statusItem.button?.effectiveAppearance ?? NSApp.effectiveAppearance
+        appearance.performAsCurrentDrawingAppearance {
+            resolved = NSColor.labelColor.usingColorSpace(.sRGB) ?? .black
+        }
+        return resolved
+    }
+
+    private static func describe(_ state: GlyphState) -> String {
+        func fill(_ value: Double?) -> String { value.map { String(format: "%.2f", $0) } ?? "-" }
+        func tint(_ value: RingTint) -> String {
+            switch value {
+            case .none: "none"
+            case .warning: "warning"
+            case .critical: "critical"
+            }
+        }
+        return "glyph cpu=\(fill(state.cpu)) mem=\(fill(state.memory)) disk=\(fill(state.disk))"
+            + " tint=mem:\(tint(state.memoryTint)),disk:\(tint(state.diskTint))"
+            + " template=\(state.isTinted ? 0 : 1)"
     }
 
     @objc func togglePanel(_ sender: Any?) {
