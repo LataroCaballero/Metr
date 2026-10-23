@@ -7,6 +7,7 @@ import Observation
 @Observable
 final class MetricsStore {
     private(set) var cpu: Reading<CPUReading> = .pending
+    private(set) var memory: Reading<MemoryReading> = .pending
 
     /// Called after every applied batch. Not observed; the status item redraws from it.
     @ObservationIgnored var didApply: (() -> Void)?
@@ -21,15 +22,21 @@ final class MetricsStore {
                 cpu = reading
             }
         }
+        if let reading = batch.memory {
+            memory = reading
+        }
         didApply?()
-        DebugHooks.log(Self.describe(cpu))
+        DebugHooks.log(Self.describe(cpu: cpu, memory: memory))
     }
 
-    private static func describe(_ reading: Reading<CPUReading>) -> String {
-        switch reading {
-        case .value(let v): "batch cpu=" + String(format: "%.2f", v.total)
-        case .pending: "batch cpu=pending"
-        case .unavailable: "batch cpu=unavailable"
-        }
+    /// Pending and unavailable readings are named, never printed as a number.
+    private static func describe(cpu: Reading<CPUReading>, memory: Reading<MemoryReading>) -> String {
+        "batch cpu=\(text(cpu.value.map(\.total), cpu)) mem=\(text(memory.value?.ringFill, memory))"
+    }
+
+    private static func text<V>(_ number: Double?, _ reading: Reading<V>) -> String {
+        if let number { return String(format: "%.2f", number) }
+        if case .unavailable = reading { return "unavailable" }
+        return "pending"
     }
 }

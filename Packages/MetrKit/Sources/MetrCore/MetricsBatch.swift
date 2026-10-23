@@ -14,10 +14,16 @@ public enum Reading<Value: Sendable & Equatable>: Sendable, Equatable {
 /// One tick's worth of readings. A nil field means the metric was not sampled this tick.
 public struct MetricsBatch: Sendable, Equatable {
     public var cpu: Reading<CPUReading>?
+    public var memory: Reading<MemoryReading>?
     public var elapsed: Double
 
-    public init(cpu: Reading<CPUReading>? = nil, elapsed: Double) {
+    public init(
+        cpu: Reading<CPUReading>? = nil,
+        memory: Reading<MemoryReading>? = nil,
+        elapsed: Double
+    ) {
         self.cpu = cpu
+        self.memory = memory
         self.elapsed = elapsed
     }
 }

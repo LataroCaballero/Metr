@@ -1,5 +1,7 @@
 .planning/
 .build/
-.swiftpm/
+DerivedData/
 xcuserdata/
+*.xcresult
+.swiftpm/
 .DS_Store
