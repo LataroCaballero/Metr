@@ -122,18 +122,26 @@ public enum RingGlyph {
             let center = NSPoint(x: centerX(forRing: index), y: centerY)
             drawRing(center: center, fill: fills[index], tint: tints[index], neutral: neutral, trackAlpha: track)
             if Metrics.drawsLetters {
-                drawLetter(Metrics.letters[index], center: center, neutral: neutral)
+                drawLetter(index, center: center, neutral: neutral)
             }
         }
     }
 
+    /// The letter font and the width of each letter are fixed, so they are created and measured
+    /// once. Building the font and laying out an attributed string on every redraw was the largest
+    /// single cost of a glyph change (FND-03 profile). Drawing happens on the main thread only.
+    private nonisolated(unsafe) static let letterFont = NSFont.systemFont(ofSize: Metrics.letter, weight: .semibold)
+    private static let letterWidths: [CGFloat] = Metrics.letters.map { letter in
+        NSAttributedString(string: letter, attributes: [.font: letterFont]).size().width
+    }
+
     /// Letters are neutral elements (never tinted). Centred on cap height rather than the line box,
     /// horizontally by measured width, with the origin snapped to whole device pixels.
-    private static func drawLetter(_ letter: String, center: NSPoint, neutral: NSColor) {
-        let font = NSFont.systemFont(ofSize: Metrics.letter, weight: .semibold)
-        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: neutral]
-        let text = NSAttributedString(string: letter, attributes: attributes)
-        let width = text.size().width
+    private static func drawLetter(_ index: Int, center: NSPoint, neutral: NSColor) {
+        let font = letterFont
+        let text = NSAttributedString(
+            string: Metrics.letters[index], attributes: [.font: font, .foregroundColor: neutral])
+        let width = letterWidths[index]
         let scale = NSGraphicsContext.current.map { $0.cgContext.userSpaceToDeviceSpaceTransform.a } ?? 1
         func snap(_ value: CGFloat) -> CGFloat { (value * scale).rounded() / scale }
         let baseline = snap(center.y - font.capHeight / 2)
