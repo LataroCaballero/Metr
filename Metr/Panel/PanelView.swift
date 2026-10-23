@@ -17,6 +17,17 @@ struct PanelView: View {
             Divider()
             HStack {
                 // The leading side stays empty; Phase 3 adds "Open Window" here.
+                #if DEBUG
+                if DebugHooks.shellSpikeEnabled {
+                    Button {
+                        onClose()
+                        ShellSpikeWindow.bringToFront()
+                    } label: {
+                        Text(verbatim: "Bring Window to Front")
+                    }
+                    .buttonStyle(.bordered)
+                }
+                #endif
                 Spacer()
                 Button("Quit Metr") { NSApp.terminate(nil) }
                     .buttonStyle(.bordered)

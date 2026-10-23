@@ -52,6 +52,16 @@ nonisolated enum DebugHooks {
         #endif
     }
 
+    /// When true, the panel footer gains a "Bring Window to Front" button (shell spike, ROADMAP
+    /// criterion 5). Debug only; Release returns false and holds no environment name.
+    static var shellSpikeEnabled: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["METR_DEBUG_SHELL_SPIKE"] == "1"
+        #else
+        return false
+        #endif
+    }
+
     /// Scheduler diagnostics sink, present only when the log hook is active.
     static var diagnostics: (@Sendable (String) -> Void)? {
         #if DEBUG
