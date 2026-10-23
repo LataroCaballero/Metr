@@ -9,6 +9,16 @@ final class MetricsStore {
     private(set) var cpu: Reading<CPUReading> = .pending
     private(set) var memory: Reading<MemoryReading> = .pending
     private(set) var disk: Reading<DiskReading> = .pending
+    /// Disk tint with its 1-point hysteresis (D-03). One state shared by the glyph and the panel.
+    private(set) var diskTint: RingTint = .none
+
+    /// Memory tint straight from the pressure level (D-01); it has no hysteresis of its own.
+    var memoryTint: RingTint { TintLogic.memory(memory.value?.pressure) }
+
+    /// True once no metric is still `.pending`. An `.unavailable` reading counts as answered.
+    var isReadyForPanel: Bool {
+        cpu != .pending && memory != .pending && disk != .pending
+    }
 
     /// Called after every applied batch. Not observed; the status item redraws from it.
     @ObservationIgnored var didApply: (() -> Void)?
@@ -29,6 +39,7 @@ final class MetricsStore {
         if let reading = batch.disk {
             disk = reading
         }
+        diskTint = TintLogic.disk(freeFraction: disk.value?.freeFraction, previous: diskTint)
         didApply?()
         DebugHooks.log(Self.describe(cpu: cpu, memory: memory, disk: disk))
     }

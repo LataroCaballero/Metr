@@ -9,6 +9,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lifecycleMonitor: SystemLifecycleMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        if let directory = DebugHooks.renderDirectory {
+            DebugSnapshotRenderer.renderAndExit(to: directory)
+            return
+        }
+        #endif
         let store = MetricsStore()
         self.store = store
         let sampler = MetricsSampler(cadenceScale: DebugHooks.cadenceScale)

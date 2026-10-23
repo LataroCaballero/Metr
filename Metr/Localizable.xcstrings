@@ -1,0 +1,162 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "CPU": {
+      "comment": "Panel column title and tooltip label for processor load",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU"
+          }
+        }
+      }
+    },
+    "Memory": {
+      "comment": "Panel column title for memory",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memoria"
+          }
+        }
+      }
+    },
+    "Disk": {
+      "comment": "Panel column title for the startup disk",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disco"
+          }
+        }
+      }
+    },
+    "Normal": {
+      "comment": "Memory pressure word shown as the panel value",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Normal"
+          }
+        }
+      }
+    },
+    "Elevated": {
+      "comment": "Memory pressure word shown as the panel value (kernel warn level)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elevada"
+          }
+        }
+      }
+    },
+    "Critical": {
+      "comment": "Memory pressure word shown as the panel value",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Crítica"
+          }
+        }
+      }
+    },
+    "%@ of %@": {
+      "comment": "Memory detail line: used amount of total amount, e.g. 11.2 of 16 GB",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ de %@"
+          }
+        }
+      }
+    },
+    "free": {
+      "comment": "Disk detail line under the free-space amount, e.g. 210 GB free",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "libres"
+          }
+        }
+      }
+    },
+    "Unavailable": {
+      "comment": "Detail line when a metric could not be read",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No disponible"
+          }
+        }
+      }
+    },
+    "Quit Metr": {
+      "comment": "Panel footer button that quits the app",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salir de Metr"
+          }
+        }
+      }
+    },
+    "Normal pressure": {
+      "comment": "VoiceOver reading for the memory column",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Presión normal"
+          }
+        }
+      }
+    },
+    "Elevated pressure": {
+      "comment": "VoiceOver reading for the memory column",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Presión elevada"
+          }
+        }
+      }
+    },
+    "Critical pressure": {
+      "comment": "VoiceOver reading for the memory column",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Presión crítica"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

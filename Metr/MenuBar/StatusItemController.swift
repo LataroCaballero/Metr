@@ -14,8 +14,6 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     /// Last state assigned to the button. The image is rebuilt only when this changes (T-01-20).
     private var lastAssigned: GlyphState?
-    /// Last disk tint, the `previous` input of the D-03 hysteresis.
-    private var diskTint: RingTint = .none
     private var appearanceObservation: NSKeyValueObservation?
     /// Held for the app lifetime; the controller is never deallocated while the app runs.
     private var contrastObserver: (any NSObjectProtocol)?
@@ -63,13 +61,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     /// give nil, so the ring stays a track and never an arc. The CPU ring never tints (D-02); the
     /// memory ring is pressure (D-01); the disk ring is the used fraction, tinted by free space (D-03).
     func refresh(force: Bool = false) {
-        diskTint = TintLogic.disk(freeFraction: store.disk.value?.freeFraction, previous: diskTint)
         let state = GlyphState(
             cpu: RingQuantizer.quantize(store.cpu.value?.total),
             memory: RingQuantizer.quantize(store.memory.value?.ringFill),
             disk: RingQuantizer.quantize(store.disk.value?.usedFraction),
-            memoryTint: TintLogic.memory(store.memory.value?.pressure),
-            diskTint: diskTint,
+            memoryTint: store.memoryTint,
+            diskTint: store.diskTint,
             increaseContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
         )
         guard force || state != lastAssigned else { return }

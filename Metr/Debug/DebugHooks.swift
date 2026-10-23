@@ -42,6 +42,16 @@ nonisolated enum DebugHooks {
         #endif
     }
 
+    /// When set, the app renders the panel fixtures to PNG files in this directory and exits.
+    static var renderDirectory: URL? {
+        #if DEBUG
+        guard let path = ProcessInfo.processInfo.environment["METR_DEBUG_RENDER_DIR"], !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true)
+        #else
+        return nil
+        #endif
+    }
+
     /// Scheduler diagnostics sink, present only when the log hook is active.
     static var diagnostics: (@Sendable (String) -> Void)? {
         #if DEBUG
