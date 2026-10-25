@@ -50,6 +50,14 @@ final class MetricsStore {
     ) -> String {
         "batch cpu=\(text(cpu.value.map(\.total), cpu)) mem=\(text(memory.value?.ringFill, memory))"
             + " disk=\(text(disk.value?.usedFraction, disk))"
+            + " diskfree=\(freeBytesText(disk))"
+    }
+
+    /// Whole bytes free, for scripts/verify/disk-live.sh. DEBUG log only.
+    private static func freeBytesText(_ disk: Reading<DiskReading>) -> String {
+        if let free = disk.value?.availableBytes { return String(free) }
+        if case .unavailable = disk { return "unavailable" }
+        return "pending"
     }
 
     private static func text<V>(_ number: Double?, _ reading: Reading<V>) -> String {
