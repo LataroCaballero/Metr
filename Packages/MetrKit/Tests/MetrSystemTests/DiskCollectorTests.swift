@@ -29,4 +29,33 @@ import Testing
         #expect(DiskReading(totalBytes: 100, availableBytes: 500).usedFraction == 0.0)
         #expect(DiskReading(totalBytes: 0, availableBytes: 0).usedFraction == 0.0)
     }
+
+    /// CR-01: Foundation caches resource values per URL instance, and the sampler queue has no
+    /// run loop to flush them. One long-lived collector must still see free space change.
+    @Test func repeatedSamplesOnOneCollectorSeeAFileAllocation() throws {
+        let directory = FileManager.default.temporaryDirectory
+        let collector = DiskCollector(volume: directory)
+        let before = try #require(collector.sample().value)
+
+        let file = directory.appending(path: "metr-disk-collector-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let size = 64 * 1024 * 1024
+        try #require(FileManager.default.createFile(atPath: file.path(percentEncoded: false), contents: nil))
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.write(contentsOf: Data(repeating: 0xA5, count: size))
+        try handle.synchronize()
+        try handle.close()
+
+        let after = try #require(collector.sample().value)
+        let fresh = try #require(DiskCollector(volume: directory).sample().value)
+        let half = Int64(size / 2)
+        #expect(before.availableBytes - after.availableBytes >= half)
+        #expect(abs(after.availableBytes - fresh.availableBytes) < half)
+    }
+
+    @Test func repeatedSamplesOfAMissingVolumeStayUnavailable() {
+        let collector = DiskCollector(volume: URL(fileURLWithPath: "/Volumes/metr-does-not-exist-XYZ"))
+        #expect(collector.sample() == .unavailable)
+        #expect(collector.sample() == .unavailable)
+    }
 }
