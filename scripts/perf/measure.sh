@@ -6,6 +6,8 @@
 # --record writes the measured values into budget.env (MEASURED_*), also when the gate fails.
 # Prints "NO-SOCKETS OK" and "BUDGET PASS cpu=<v> wakeups=<v> footprint=<v>", or
 # "SOCKETS FOUND" / "BUDGET FAIL <metric>=<v> max=<v>" with exit 1.
+# Fails closed (WR-03): "FAIL: could not parse rusage output: <line>" with exit 1 when cpu_pct,
+# wakeups_per_s or footprint_mb is not a plain number; nothing is recorded or compared then.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -50,6 +52,12 @@ echo "$LINE"
 CPU="$(printf '%s\n' "$LINE" | sed -E 's/.*cpu_pct=([0-9.]+).*/\1/')"
 WAKE="$(printf '%s\n' "$LINE" | sed -E 's/.*wakeups_per_s=([0-9.]+).*/\1/')"
 FOOT="$(printf '%s\n' "$LINE" | sed -E 's/.*footprint_mb=([0-9.]+).*/\1/')"
+
+# WR-03: sed leaves the whole line behind when a field is missing, and metr_gt coerces text to 0,
+# which would pass the gate and write garbage into budget.env. Reject anything but plain numbers.
+for value in "$CPU" "$WAKE" "$FOOT"; do
+  metr_is_number "$value" || fail "FAIL: could not parse rusage output: $LINE"
+done
 
 # Zero-telemetry check (T-01-17): any socket line is a failure.
 SOCKETS="$(lsof -a -p "$PID" -i 2>/dev/null || true)"

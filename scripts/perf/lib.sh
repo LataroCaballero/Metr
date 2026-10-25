@@ -53,3 +53,8 @@ budget_set() {
 metr_gt() {
   awk -v a="$1" -v b="$2" 'BEGIN { print (a + 0 > b + 0) ? 1 : 0 }'
 }
+
+# Exit 0 only when $1 is a plain non-negative number (digits, optionally one decimal part).
+metr_is_number() {
+  [[ "${1:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]]
+}
