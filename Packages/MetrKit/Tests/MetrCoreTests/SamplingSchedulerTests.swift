@@ -146,4 +146,40 @@ private func median(_ values: [Double]) -> Double {
         scheduler.stop()
         #expect(rec.plans.last?.tier == .panel)
     }
+
+    @Test func baselineHookFiresOnStartAndOnlyOnRealResume() async throws {
+        let queue = DispatchQueue(label: "test.sched.baseline", qos: .utility)
+        let scheduler = SamplingScheduler(queue: queue, cadenceScale: 0.05)
+        let rec = SchedulerRecorder()
+        let baselines = Mutex(0)
+        scheduler.start(
+            onTick: { due, elapsed, priming in
+                rec.add(.init(due: due, elapsed: elapsed, priming: priming))
+            },
+            onBaseline: { baselines.withLock { $0 += 1 } })
+
+        try await sleep(150)
+        #expect(baselines.withLock { $0 } == 1)
+
+        // A resume with no matching suspend leaves the plan unchanged.
+        scheduler.resume(reason: .sessionInactive)
+        try await sleep(100)
+        #expect(baselines.withLock { $0 } == 1)
+
+        // Another reason still holds, so this resume does not re-prime.
+        scheduler.suspend(reason: .systemSleep)
+        scheduler.suspend(reason: .displaySleep)
+        try await sleep(60)
+        scheduler.resume(reason: .displaySleep)
+        try await sleep(60)
+        #expect(baselines.withLock { $0 } == 1)
+
+        // The last reason clears: a fresh baseline, then an all-metrics tick.
+        rec.clear()
+        scheduler.resume(reason: .systemSleep)
+        try await sleep(150)
+        scheduler.stop()
+        #expect(baselines.withLock { $0 } == 2)
+        #expect(rec.events.first?.due == Set(Metric.allCases))
+    }
 }

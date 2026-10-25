@@ -19,7 +19,7 @@ LOG="$METR_LOGS/suspend.log"
 : > "$LOG"
 
 metr_kill
-open -g -n --env "METR_DEBUG_LOG=$LOG" "$METR_APP_DEBUG"
+open -g -n --env "METR_DEBUG_LOG=$LOG" "$METR_APP_DEBUG" --args -MetrDidPresentWelcome YES
 sleep 6
 pmset displaysleepnow
 sleep 20

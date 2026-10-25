@@ -36,7 +36,8 @@ private func footprint() -> UInt64 {
     /// Guards the vm_deallocate in readTicks (T-01-03): a leak of the kernel array
     /// would grow the footprint by many MiB over 10,000 calls (each leaked array is at least one
     /// 16 KiB page, so a real leak is well over 100 MiB). The footprint is process-wide and the
-    /// other suites run in parallel, so the threshold leaves room for their allocations.
+    /// other suites run in parallel (MetricsSamplerTests runs two live samplers and adds up to ~10 MiB),
+    /// so the threshold leaves room for their allocations: 32 MiB is still five times below a leak.
     @Test func tenThousandReadsDoNotGrowFootprint() throws {
         _ = CPUCollector.readTicks()  // warm up
         let before = footprint()
@@ -46,6 +47,6 @@ private func footprint() -> UInt64 {
         }
         let after = footprint()
         let growth = after > before ? after - before : 0
-        #expect(growth < 8_388_608, "footprint grew by \(growth) bytes")
+        #expect(growth < 33_554_432, "footprint grew by \(growth) bytes")
     }
 }

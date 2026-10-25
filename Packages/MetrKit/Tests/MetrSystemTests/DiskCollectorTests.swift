@@ -42,7 +42,10 @@ import Testing
         let size = 64 * 1024 * 1024
         try #require(FileManager.default.createFile(atPath: file.path(percentEncoded: false), contents: nil))
         let handle = try FileHandle(forWritingTo: file)
-        try handle.write(contentsOf: Data(repeating: 0xA5, count: size))
+        // 1 MiB chunks: a single 64 MiB buffer would inflate this process's footprint and trip
+        // CPUCollectorTests.tenThousandReadsDoNotGrowFootprint when the suites run in parallel.
+        let chunk = Data(repeating: 0xA5, count: 1024 * 1024)
+        for _ in 0..<(size / chunk.count) { try handle.write(contentsOf: chunk) }
         try handle.synchronize()
         try handle.close()
 

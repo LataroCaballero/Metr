@@ -18,6 +18,7 @@ public final class SamplingScheduler: @unchecked Sendable {
     private var lastSampled: [Metric: Double] = [:]
     private var lastDelivery: Double?
     private var onTick: TickHandler?
+    private var onBaseline: (@Sendable () -> Void)?
     private var started = false
     /// True from a start/resume until the priming fire has been delivered.
     private var primePending = false
@@ -35,9 +36,13 @@ public final class SamplingScheduler: @unchecked Sendable {
 
     // MARK: Public API (hops onto the queue)
 
-    public func start(onTick: @escaping TickHandler) {
+    /// `onBaseline` is called on the queue right before the scheduler takes a fresh baseline
+    /// (start, or a resume that re-primes). Never called for a resume that leaves the plan
+    /// unchanged.
+    public func start(onTick: @escaping TickHandler, onBaseline: (@Sendable () -> Void)? = nil) {
         queue.async {
             self.onTick = onTick
+            self.onBaseline = onBaseline
             self.started = true
             self.plan = self.makePlan()
             self.onPlanChange?(self.plan)
@@ -125,6 +130,7 @@ public final class SamplingScheduler: @unchecked Sendable {
     /// Start or resume: an immediate all-metrics tick takes the baselines, then a short
     /// priming fire (cpu only) delivers the first real CPU delta before the normal cadence.
     private func beginRunning() {
+        onBaseline?()
         primePending = true
         deliver(due: Set(Metric.allCases), elapsed: 0, priming: false)
         startTimer()

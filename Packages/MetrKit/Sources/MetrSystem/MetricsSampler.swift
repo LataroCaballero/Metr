@@ -33,18 +33,24 @@ public final class MetricsSampler: @unchecked Sendable {
                 diagnostics?(Self.describe(plan))
             }
         }
-        scheduler.start { [self] due, elapsed, priming in
-            // Runs on `queue`; the collectors are confined there.
-            let sampled = due.intersection(Self.supported)
-            guard !sampled.isEmpty else { return }
-            if priming { diagnostics?("prime") }
-            diagnostics?(Self.describe(tick: elapsed, metrics: sampled))
-            var batch = MetricsBatch(elapsed: elapsed)
-            if sampled.contains(.cpu) { batch.cpu = cpu.sample() }
-            if sampled.contains(.memory) { batch.memory = memory.sample() }
-            if sampled.contains(.disk) { batch.disk = disk.sample() }
-            onBatch(batch)
-        }
+        scheduler.start(
+            onTick: { [self] due, elapsed, priming in
+                // Runs on `queue`; the collectors are confined there.
+                let sampled = due.intersection(Self.supported)
+                guard !sampled.isEmpty else { return }
+                if priming { diagnostics?("prime") }
+                diagnostics?(Self.describe(tick: elapsed, metrics: sampled))
+                var batch = MetricsBatch(elapsed: elapsed)
+                if sampled.contains(.cpu) { batch.cpu = cpu.sample() }
+                if sampled.contains(.memory) { batch.memory = memory.sample() }
+                if sampled.contains(.disk) { batch.disk = disk.sample() }
+                onBatch(batch)
+            },
+            onBaseline: { [self] in
+                // Runs on `queue`, right before the scheduler's all-metrics baseline tick: a
+                // delta must never span a suspension.
+                cpu.resetBaseline()
+            })
     }
 
     public func stop() {
@@ -74,12 +80,12 @@ public final class MetricsSampler: @unchecked Sendable {
         }
     }
 
-    /// Resets the CPU baseline first: a delta across a suspension would be a spike.
-    /// The scheduler then takes a fresh baseline tick and primes.
+    /// The scheduler resets the CPU baseline through `onBaseline` only when it actually
+    /// re-primes (it takes a fresh baseline tick, then primes). A resume with no matching
+    /// suspend, or one made while another reason still holds, keeps the last baseline (WR-04).
     public func resume(reason: SuspendReason) {
         queue.async {
             self.diagnostics?("resume reason=\(reason.rawValue)")
-            self.cpu.resetBaseline()
             self.scheduler.resume(reason: reason)
         }
     }
