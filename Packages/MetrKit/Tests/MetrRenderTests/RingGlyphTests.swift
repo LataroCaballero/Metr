@@ -96,11 +96,11 @@ import Testing
         #expect(bottom.r < 0.1 && bottom.g < 0.1 && bottom.b < 0.1)
     }
 
-    @Test func warningMemoryArcIsYellow() {
+    @Test func warningMemoryArcIsOrange() {
         let state = GlyphState(cpu: nil, memory: 1, disk: nil, memoryTint: .warning)
         let rep = RingGlyph.bitmap(for: state, scale: 2)
         let top = pixel(rep, x: 56, y: 4)
-        #expect(top.r > 0.8 && top.g > 0.6 && top.b < 0.4)
+        #expect(top.r > 0.8 && top.g > 0.35 && top.g < 0.75 && top.b < 0.3)
     }
 
     @Test func untouchedRingsRenderIdenticallyInTintedAndTemplatePaths() {
