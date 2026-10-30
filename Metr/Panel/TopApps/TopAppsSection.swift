@@ -67,7 +67,10 @@ struct TopAppsSection: View {
                 ForEach(rows) { row in
                     AppRow(
                         data: row, effectiveSort: display.effectiveSort, text: text,
-                        toggle: { model.toggle(row.id) }, quit: { model.quit(row.id) })
+                        toggle: { model.toggle(row.id) }, quit: { model.quit(row.id) },
+                        requestForceQuit: { model.requestForceQuit(row.id) },
+                        confirmForceQuit: { model.confirmForceQuit(row.id) },
+                        cancelForceQuit: { model.cancelForceQuit(row.id) })
                     if row.isExpanded {
                         ForEach(row.helpers) { helper in
                             HelperRow(data: helper, effectiveSort: display.effectiveSort, text: text)

@@ -133,6 +133,114 @@
         }
       }
     },
+    "Force Quit %@…": {
+      "comment": "Context menu item of an app row: force quits that app, after a confirmation",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forzar salida de %@…"
+          }
+        }
+      }
+    },
+    "Force Quit…": {
+      "comment": "Borderless button that replaces the numbers of a row whose app did not quit",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forzar salida…"
+          }
+        }
+      }
+    },
+    "%@ didn't quit. It may be waiting for you.": {
+      "comment": "Tooltip of the Force Quit… offer after Quit was refused or ignored",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ no se cerró. Puede que esté esperando una respuesta tuya."
+          }
+        }
+      }
+    },
+    "Force quit %@?": {
+      "comment": "Title of the inline Force Quit confirmation of an app row",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Forzar la salida de %@?"
+          }
+        }
+      }
+    },
+    "Force quit %@ in %@?": {
+      "comment": "Title of the inline Force Quit confirmation of a helper row: helper name, then app name",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Forzar la salida de %1$@ en %2$@?"
+          }
+        }
+      }
+    },
+    "Unsaved changes will be lost.": {
+      "comment": "Body of the Force Quit confirmation of an app",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se perderán los cambios sin guardar."
+          }
+        }
+      }
+    },
+    "The app may stop responding.": {
+      "comment": "Body of the Force Quit confirmation of a helper process",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La app podría dejar de responder."
+          }
+        }
+      }
+    },
+    "Cancel": {
+      "comment": "Cancel button of the inline Force Quit confirmation",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelar"
+          }
+        }
+      }
+    },
+    "Force Quit": {
+      "comment": "Destructive button of the inline Force Quit confirmation",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forzar salida"
+          }
+        }
+      }
+    },
     "Quitting…": {
       "comment": "Shown in a Top Apps row after Quit was sent, until the app exits",
       "extractionState": "manual",

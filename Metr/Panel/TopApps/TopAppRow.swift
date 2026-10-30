@@ -14,10 +14,14 @@ struct AppRow: View {
     let text: MetricText
     let toggle: () -> Void
     let quit: () -> Void
+    let requestForceQuit: () -> Void
+    let confirmForceQuit: () -> Void
+    let cancelForceQuit: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
     @State private var isOverButton = false
+    @State private var isOverOffer = false
     @FocusState private var buttonFocused: Bool
 
     /// The hover Quit is offered only for a process the user may quit; never on a disabled row (D-17).
@@ -31,7 +35,21 @@ struct AppRow: View {
     }
     private var showsAction: Bool { canQuit && (isHovering || buttonFocused) }
 
+    /// Quit did not end the app: the numbers give way to the Force Quit… offer (D-15).
+    private var offersForceQuit: Bool { data.actionState == .didNotQuit && data.availability == .allowed }
+
     var body: some View {
+        if data.actionState == .confirming {
+            // The confirmation replaces the row in place; the popover stays open (D-14).
+            ConfirmationRow(
+                variant: .app(name: data.name), cancel: cancelForceQuit, confirm: confirmForceQuit)
+        } else {
+            rowContent
+        }
+    }
+
+    @ViewBuilder
+    private var rowContent: some View {
         let cpu = text.processCPU(data.cpuPercent)
         let memory = text.processMemory(data.footprintBytes)
         let expandsLabel =
@@ -41,7 +59,11 @@ struct AppRow: View {
         let reading = String(localized: "\(data.name), CPU \(cpu), memory \(memory)")
         // A system row adds "System process" for VoiceOver (D-09).
         let base = data.kind == .system ? reading + ", " + String(localized: "System process") : reading
-        let spoken = isWorking ? data.name + ", " + String(localized: "Quitting…") : base
+        let didNotQuit = String(localized: "\(data.name) didn't quit. It may be waiting for you.")
+        let spoken =
+            isWorking
+            ? data.name + ", " + String(localized: "Quitting…")
+            : offersForceQuit ? didNotQuit : base
         HStack(spacing: 0) {
             gutter(label: expandsLabel)
             Color.clear.frame(width: 4)
@@ -60,6 +82,8 @@ struct AppRow: View {
                     .foregroundStyle(Color.secondary)
                     .lineLimit(1)
                     .frame(width: 100, alignment: .trailing)
+            } else if offersForceQuit {
+                forceQuitOffer(help: didNotQuit)
             } else {
                 number(cpu, active: effectiveSort == .cpu)
                     .minimumScaleFactor(0.85)
@@ -84,6 +108,7 @@ struct AppRow: View {
         .contentShape(Rectangle())
         // Tapping anywhere on a group row toggles it; a row with no helpers is not a control.
         .onTapGesture { if data.helperCount > 0 { animatedToggle() } }
+        .contextMenu { menu }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
         .accessibilityActions {
@@ -92,8 +117,36 @@ struct AppRow: View {
             }
             if canQuit {
                 Button(quitLabel) { quit() }
+                Button(String(localized: "Force Quit \(data.name)…")) { requestForceQuit() }
             }
         }
+    }
+
+    /// The context menu: system-drawn, text only, sized by its content (UI-SPEC "Context menus").
+    /// Quit and Force Quit are offered only while the row's availability is `.allowed`.
+    @ViewBuilder
+    private var menu: some View {
+        if canQuit {
+            Button("Quit \(data.name)") { quit() }
+            Button("Force Quit \(data.name)…", role: .destructive) { requestForceQuit() }
+        }
+    }
+
+    /// The borderless "Force Quit…" that replaces the numbers after a Quit that did not end the
+    /// app. It only opens the confirmation; it never force quits by itself (D-15).
+    private func forceQuitOffer(help: String) -> some View {
+        Button(action: requestForceQuit) {
+            Text("Force Quit…")
+                .font(.subheadline)
+                .foregroundStyle(isOverOffer ? Color.primary : Color.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(width: 100, alignment: .trailing)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isOverOffer = $0 }
+        .help(help)
     }
 
     /// The 20 pt action slot: empty at rest, and always empty on a row the user may not act on.
