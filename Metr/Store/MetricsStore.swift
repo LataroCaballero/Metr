@@ -1,5 +1,6 @@
 import Foundation
 import MetrCore
+import MetrSystem
 import Observation
 
 /// MainActor-owned snapshot of the latest readings. Fed by `AppDelegate.makeBatchSink`.
@@ -11,6 +12,10 @@ final class MetricsStore {
     private(set) var disk: Reading<DiskReading> = .pending
     /// Disk tint with its 1-point hysteresis (D-03). One state shared by the glyph and the panel.
     private(set) var diskTint: RingTint = .none
+
+    /// The system's names for the core tiers (`hw.perflevelN.name`, perflevel 0 first), read once.
+    /// Empty when the layout cannot be read. They name the cluster bars while CPU is not yet sampled.
+    let coreLevelNames: [String] = CPUCollector.readLayout()?.levels.map(\.name) ?? []
 
     /// Memory tint straight from the pressure level (D-01); it has no hysteresis of its own.
     var memoryTint: RingTint { TintLogic.memory(memory.value?.pressure) }
@@ -53,6 +58,18 @@ final class MetricsStore {
             + " diskfree=\(freeBytesText(disk))"
             // PANEL-01: the CPU split, for scripts/verify/cpu-vs-top.sh. DEBUG log only.
             + " cpuuser=\(text(cpu.value.map(\.user), cpu)) cpusys=\(text(cpu.value.map(\.system), cpu))"
+            + " clusters=\(clustersText(cpu))"
+    }
+
+    /// `Name:0.00,Name:0.00`, `none` when the value has no clusters, or the pending / unavailable word.
+    /// Tier names are system names, not personal data. DEBUG log only.
+    private static func clustersText(_ cpu: Reading<CPUReading>) -> String {
+        if let value = cpu.value {
+            if value.clusters.isEmpty { return "none" }
+            return value.clusters.map { "\($0.name):" + String(format: "%.2f", $0.usage) }.joined(separator: ",")
+        }
+        if case .unavailable = cpu { return "unavailable" }
+        return "pending"
     }
 
     /// Whole bytes free, for scripts/verify/disk-live.sh. DEBUG log only.

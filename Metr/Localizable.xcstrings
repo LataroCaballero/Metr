@@ -384,6 +384,90 @@
           }
         }
       }
+    },
+    "Perf": {
+      "comment": "CPU cluster label: abbreviation of the system tier 'Performance' (hw.perflevelN.name)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rend."
+          }
+        }
+      }
+    },
+    "Eff": {
+      "comment": "CPU cluster label: abbreviation of the system tier 'Efficiency' (hw.perflevelN.name)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Efic."
+          }
+        }
+      }
+    },
+    "Super": {
+      "comment": "CPU cluster label: the system tier 'Super' (M5 family)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Super"
+          }
+        }
+      }
+    },
+    "Performance cores %@": {
+      "comment": "VoiceOver: average load of the performance core cluster, e.g. Performance cores 41%",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Núcleos de rendimiento %@"
+          }
+        }
+      }
+    },
+    "Efficiency cores %@": {
+      "comment": "VoiceOver: average load of the efficiency core cluster, e.g. Efficiency cores 18%",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Núcleos de eficiencia %@"
+          }
+        }
+      }
+    },
+    "Super cores %@": {
+      "comment": "VoiceOver: average load of the Super core cluster (M5 family)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Núcleos Super %@"
+          }
+        }
+      }
+    },
+    "%@ cores %@": {
+      "comment": "VoiceOver: average load of a core cluster with a name this app has no translation for: system name, then percent",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Núcleos %1$@ %2$@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -5,8 +5,45 @@ import MetrCore
 /// Confined to the sampler queue; not Sendable.
 public final class CPUCollector {
     private var baseline: [CPUTicks]?
+    /// Read once: the core tiers do not change while the app runs.
+    private let layout: CoreLayout?
 
-    public init() {}
+    public init() {
+        layout = Self.readLayout()
+    }
+
+    /// The core tiers from `hw.nperflevels`, `hw.perflevelN.name` and `hw.perflevelN.logicalcpu`
+    /// (CPU-02). Nil when any sysctl fails or the counts do not add up to `hw.logicalcpu`.
+    public static func readLayout() -> CoreLayout? {
+        guard let levelCount = sysctlInt32("hw.nperflevels"), levelCount > 0,
+            let logical = sysctlInt32("hw.logicalcpu")
+        else { return nil }
+        var levels: [CoreLevel] = []
+        for i in 0..<Int(levelCount) {
+            guard let name = sysctlString("hw.perflevel\(i).name"), !name.isEmpty,
+                let cpus = sysctlInt32("hw.perflevel\(i).logicalcpu")
+            else { return nil }
+            levels.append(CoreLevel(name: name, logicalCPUs: Int(cpus)))
+        }
+        guard levels.reduce(0, { $0 + $1.logicalCPUs }) == Int(logical) else { return nil }
+        return CoreLayout(levels: levels)
+    }
+
+    private static func sysctlInt32(_ name: String) -> Int32? {
+        var value: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        guard sysctlbyname(name, &value, &size, nil, 0) == 0 else { return nil }
+        return value
+    }
+
+    /// String sysctl: size query first, then the read.
+    private static func sysctlString(_ name: String) -> String? {
+        var size = 0
+        guard sysctlbyname(name, nil, &size, nil, 0) == 0, size > 0 else { return nil }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctlbyname(name, &buffer, &size, nil, 0) == 0 else { return nil }
+        return String(cString: buffer)
+    }
 
     /// Per-core cumulative ticks, or nil if the kernel call fails.
     public static func readTicks() -> [CPUTicks]? {
@@ -47,7 +84,7 @@ public final class CPUCollector {
             return .pending
         }
         baseline = current
-        if let reading = CPUMath.usage(previous: previous, current: current) {
+        if let reading = CPUMath.usage(previous: previous, current: current, layout: layout) {
             return .value(reading)
         }
         return .pending

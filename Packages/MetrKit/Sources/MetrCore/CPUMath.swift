@@ -47,14 +47,74 @@ public struct CPUReading: Sendable, Equatable {
     }
 }
 
+/// One `hw.perflevelN` tier: the system's name for it and how many logical CPUs it has.
+public struct CoreLevel: Sendable, Equatable {
+    public var name: String
+    public var logicalCPUs: Int
+
+    public init(name: String, logicalCPUs: Int) {
+        self.name = name
+        self.logicalCPUs = logicalCPUs
+    }
+}
+
+/// The cores of one cluster as indices into the `host_processor_info` array.
+public struct CoreClusterRange: Sendable, Equatable {
+    public var name: String
+    public var cores: Range<Int>
+
+    public init(name: String, cores: Range<Int>) {
+        self.name = name
+        self.cores = cores
+    }
+}
+
+/// The chip's core tiers as the kernel reports them (CPU-02, D-02).
+///
+/// `levels[0]` is the highest-performance tier (`hw.perflevel0`). `host_processor_info` numbers
+/// the cores least-performant first (verified on an M4: indices 0-5 are Efficiency, 6-9
+/// Performance; research Open Question 3, assumption A1 for 3-tier chips), so the ranges are laid
+/// out by walking the levels from the highest index down.
+public struct CoreLayout: Sendable, Equatable {
+    public var levels: [CoreLevel]
+
+    public init(levels: [CoreLevel]) {
+        self.levels = levels
+    }
+
+    /// Core index ranges in display order (perflevel 0 first), or nil when the layout cannot be
+    /// trusted: no levels, a level with no CPUs, or counts that do not add up to `coreCount`.
+    /// Nil makes `CPUMath` omit the clusters rather than guess a mapping (T-02-01).
+    public func clusterRanges(coreCount: Int) -> [CoreClusterRange]? {
+        guard !levels.isEmpty, levels.allSatisfy({ $0.logicalCPUs > 0 }),
+            levels.reduce(0, { $0 + $1.logicalCPUs }) == coreCount
+        else { return nil }
+        var ranges: [CoreClusterRange] = []
+        var start = 0
+        for level in levels.reversed() {
+            ranges.append(CoreClusterRange(name: level.name, cores: start..<(start + level.logicalCPUs)))
+            start += level.logicalCPUs
+        }
+        return ranges.reversed()
+    }
+}
+
 public enum CPUMath {
     /// Utilization between two snapshots, summed over all cores.
     /// Returns nil for empty arrays, mismatched core counts, or a zero total delta.
-    public static func usage(previous: [CPUTicks], current: [CPUTicks]) -> CPUReading? {
+    ///
+    /// With a `layout` whose counts add up to the core count, also returns one average busy
+    /// fraction per cluster (CPU-02, D-02), in `levels` order. If the layout does not add up, or a
+    /// cluster saw no ticks at all, `clusters` is empty: a missing value is never a fabricated 0.
+    public static func usage(
+        previous: [CPUTicks], current: [CPUTicks], layout: CoreLayout? = nil
+    ) -> CPUReading? {
         guard !previous.isEmpty, previous.count == current.count else { return nil }
         var userBusy: UInt64 = 0
         var systemBusy: UInt64 = 0
         var total: UInt64 = 0
+        var coreBusy: [UInt64] = []
+        var coreTotal: [UInt64] = []
         for (p, c) in zip(previous, current) {
             // Wrapping subtraction: the tick counters are UInt32 and may wrap.
             let user = UInt64(c.user &- p.user)
@@ -65,6 +125,8 @@ public enum CPUMath {
             userBusy += user + nice
             systemBusy += system
             total += user + system + nice + idle
+            coreBusy.append(user + system + nice)
+            coreTotal.append(user + system + nice + idle)
         }
         guard total > 0 else { return nil }
         let denominator = Double(total)
@@ -72,7 +134,20 @@ public enum CPUMath {
         return CPUReading(
             total: min(1, max(0, busy)),
             user: min(1, max(0, Double(userBusy) / denominator)),
-            system: min(1, max(0, Double(systemBusy) / denominator))
+            system: min(1, max(0, Double(systemBusy) / denominator)),
+            clusters: clusters(layout: layout, coreBusy: coreBusy, coreTotal: coreTotal)
         )
+    }
+
+    private static func clusters(layout: CoreLayout?, coreBusy: [UInt64], coreTotal: [UInt64]) -> [CPUCluster] {
+        guard let ranges = layout?.clusterRanges(coreCount: coreTotal.count) else { return [] }
+        var result: [CPUCluster] = []
+        for range in ranges {
+            let busy = coreBusy[range.cores].reduce(0, +)
+            let total = coreTotal[range.cores].reduce(0, +)
+            guard total > 0 else { return [] }
+            result.append(CPUCluster(name: range.name, usage: min(1, max(0, Double(busy) / Double(total)))))
+        }
+        return result
     }
 }
