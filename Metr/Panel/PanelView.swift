@@ -144,12 +144,23 @@ private struct RingsSection: View {
         guard let memory = store.memory.value else {
             return MetricColumn(
                 symbol: "memorychip", title: title, fill: nil, tint: .none,
-                value: valueText(nil), detail: unavailable, accessibilityReading: unavailable)
+                value: valueText(nil), detail: unavailable, accessibilityReading: unavailable
+            ) { Self.extraLine(nil) }
         }
         let used = text.memoryUsedNumber(memory.usedBytes)
         let total = text.memoryBytes(memory.totalBytes)
         let detail = String(localized: "\(used) of \(total)")
         let word = pressureWord(memory.pressure)
+        var spoken = "\(pressureReading(memory.pressure)), \(detail)"
+        // Swap appears only while it is in use, and takes no reserved line otherwise (D-03).
+        var swapLine: String?
+        if memory.swapUsedBytes > 0 {
+            let swap = text.memoryBytes(memory.swapUsedBytes)
+            swapLine = String(localized: "Swap \(swap)")
+            spoken += String(
+                localized: "Memory.SwapSpoken", defaultValue: ", swap \(swap)",
+                comment: "VoiceOver suffix of the Memory column, only while swap is in use")
+        }
         return MetricColumn(
             symbol: "memorychip",
             title: title,
@@ -157,8 +168,8 @@ private struct RingsSection: View {
             tint: store.memoryTint,
             value: valueText(word),
             detail: detail,
-            accessibilityReading: "\(pressureReading(memory.pressure)), \(detail)"
-        )
+            accessibilityReading: spoken
+        ) { Self.extraLine(swapLine) }
     }
 
     private var diskColumn: some View {
@@ -166,10 +177,14 @@ private struct RingsSection: View {
         guard let disk = store.disk.value else {
             return MetricColumn(
                 symbol: "internaldrive", title: title, fill: nil, tint: .none,
-                value: valueText(nil), detail: unavailable, accessibilityReading: unavailable)
+                value: valueText(nil), detail: unavailable, accessibilityReading: unavailable
+            ) { Self.extraLine(nil) }
         }
         let free = text.diskBytes(disk.availableBytes)
         let detail = String(localized: "free")
+        // Used = total minus the important-usage free figure, so the two lines add up to the
+        // total shown in the tooltip (D-04). Clamped so a transient odd reading never goes negative.
+        let used = String(localized: "\(text.diskBytes(max(0, disk.totalBytes - disk.availableBytes))) used")
         return MetricColumn(
             symbol: "internaldrive",
             title: title,
@@ -177,8 +192,23 @@ private struct RingsSection: View {
             tint: store.diskTint,
             value: valueText(free),
             detail: detail,
-            accessibilityReading: "\(free) \(detail)"
-        )
+            accessibilityReading: "\(free) \(detail), \(used)"
+        ) { Self.extraLine(used) }
+    }
+
+    /// An 11 pt secondary line below the detail (Swap, used). nil draws nothing, not even a
+    /// reserved gap, so columns may differ in height (D-03).
+    @ViewBuilder
+    private static func extraLine(_ line: String?) -> some View {
+        if let line {
+            Text(verbatim: line)
+                .font(.subheadline)
+                .foregroundStyle(Color.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+                .padding(.top, 4)
+        }
     }
 
     private var unavailable: String { String(localized: "Unavailable") }

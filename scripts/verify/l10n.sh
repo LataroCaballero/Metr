@@ -2,7 +2,10 @@
 # Usage: scripts/verify/l10n.sh
 # Fails when any String Catalog key lacks a translated, non-empty ES value.
 # When METR_APP_RELEASE exists, also requires es.lproj/Localizable.strings in the bundle.
-# Prints "L10N OK keys=<n>".
+# Also fails when the keys the compiler extracted from the Swift sources (the newest Debug or Release
+# build's *.stringsdata, "Localizable" table) differ from the catalog's non-stale keys, in either
+# direction: a used key missing from the catalog, or a catalog key no code uses.
+# Prints "L10N OK keys=<n> extracted=<n>".
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -58,6 +61,49 @@ if missing:
 print(f"KEYS={checked}")
 PY
 
+# Keys the compiler extracted. GeneratedStringSymbols_Localizable.stringsdata is built from the
+# catalog itself, so it is excluded: counting it would make the comparison measure nothing.
+extracted="$(python3 -I - "$CATALOG" "$METR_DERIVED/Build/Intermediates.noindex/Metr.build" <<'PY'
+import glob, json, os, sys
+
+catalog = json.load(open(sys.argv[1], encoding="utf-8"))
+base = sys.argv[2]
+
+def files(config):
+    pattern = os.path.join(base, config, "Metr.build", "Objects-normal", "arm64", "*.stringsdata")
+    return [f for f in glob.glob(pattern) if not os.path.basename(f).startswith("GeneratedStringSymbols")]
+
+candidates = [(max(os.path.getmtime(f) for f in fs), fs) for fs in (files("Debug"), files("Release")) if fs]
+if not candidates:
+    print("FAIL: no compiler-extracted strings (build first)")
+    sys.exit(1)
+newest = max(candidates, key=lambda c: c[0])[1]
+
+extracted = set()
+for f in newest:
+    for entry in json.load(open(f, encoding="utf-8")).get("tables", {}).get("Localizable", []):
+        extracted.add(entry["key"])
+
+known = {
+    k for k, e in catalog.get("strings", {}).items()
+    if e.get("extractionState") != "stale" and e.get("shouldTranslate") is not False
+}
+missing = sorted(extracted - set(catalog.get("strings", {})))
+unused = sorted(known - extracted)
+if missing:
+    print("FAIL: extracted keys missing from the catalog:")
+    for k in missing:
+        print("  " + repr(k))
+    sys.exit(1)
+if unused:
+    print("FAIL: catalog keys the compiler does not extract:")
+    for k in unused:
+        print("  " + repr(k))
+    sys.exit(1)
+print(len(extracted))
+PY
+)" || { echo "$extracted"; exit 1; }
+
 keys="$(python3 -I -c 'import json,sys; c=json.load(open(sys.argv[1], encoding="utf-8")); print(sum(1 for e in c["strings"].values() if e.get("extractionState")!="stale" and e.get("shouldTranslate") is not False))' "$CATALOG")"
 
 if [ -d "$METR_APP_RELEASE" ]; then
@@ -65,4 +111,4 @@ if [ -d "$METR_APP_RELEASE" ]; then
     || { echo "FAIL: Release bundle has no es.lproj/Localizable.strings" >&2; exit 1; }
 fi
 
-echo "L10N OK keys=$keys"
+echo "L10N OK keys=$keys extracted=$extracted"

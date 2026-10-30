@@ -594,6 +594,48 @@
           }
         }
       }
+    },
+    "Swap %@": {
+      "comment": "Memory column line shown only while swap is in use, e.g. Swap 1.2 GB",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Swap %@"
+          }
+        }
+      }
+    },
+    "%@ used": {
+      "comment": "Disk column line under free, e.g. 284 GB used",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ usados"
+          }
+        }
+      }
+    },
+    "Memory.SwapSpoken": {
+      "comment": "VoiceOver suffix of the Memory column, only while swap is in use",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": ", swap %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": ", swap %@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
