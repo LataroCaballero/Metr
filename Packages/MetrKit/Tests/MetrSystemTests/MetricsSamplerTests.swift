@@ -1,3 +1,4 @@
+import Darwin
 import Synchronization
 import Testing
 
@@ -18,6 +19,26 @@ private func sleep(_ ms: Int) async throws {
 private func isPending<V>(_ reading: Reading<V>) -> Bool {
     if case .pending = reading { return true }
     return false
+}
+
+
+/// `kill(pid, 0)` as (result, errno). top is setuid root but keeps the user's real uid, so the
+/// same-user probe answers 0 while the child runs and ESRCH once it is gone and reaped.
+private func probe(_ pid: Int32) -> (result: Int32, error: Int32) {
+    let result = kill(pid, 0)
+    return (result, result == 0 ? 0 : errno)
+}
+
+/// Polls `topChildPID()` until it matches `wantPresent`, up to `timeoutMs`.
+private func waitForTopChild(_ sampler: MetricsSampler, present: Bool, timeoutMs: Int) async throws -> Int32? {
+    var waited = 0
+    while waited <= timeoutMs {
+        let pid = sampler.topChildPID()
+        if (pid != nil) == present { return pid }
+        try await sleep(10)
+        waited += 10
+    }
+    return sampler.topChildPID()
 }
 
 /// WR-04: the CPU baseline is reset only when the scheduler takes a fresh baseline.
@@ -86,5 +107,62 @@ private func isPending<V>(_ reading: Reading<V>) -> Bool {
         #expect(
             !batches.dropFirst(settled).contains { $0.processes != nil },
             "processes were still being emitted after the panel closed")
+    }
+
+    /// T-02-21 / RESEARCH Pitfall 3: the top child exists only while panel or window demand does.
+    @Test func topChildLivesOnlyWhileDemandExists() async throws {
+        let sampler = MetricsSampler(cadenceScale: 0.05)
+        sampler.start(onBatch: { _ in })
+        try await sleep(100)
+        #expect(sampler.topChildPID() == nil, "a top child exists with no demand")
+
+        sampler.register(.panel)
+        let pid = try #require(
+            try await waitForTopChild(sampler, present: true, timeoutMs: 1500),
+            "no top child within 1.5 s of the panel opening")
+        let alive = probe(pid)
+        #expect(alive.result == 0, "top pid \(pid) is not alive: result \(alive.result) errno \(alive.error)")
+
+        sampler.cancel(.panel)
+        let after = try await waitForTopChild(sampler, present: false, timeoutMs: 1000)
+        #expect(after == nil, "the top child is still held after the last cancel")
+        var gone = probe(pid)
+        var waited = 0
+        while gone.result == 0 && waited < 1000 {
+            try await sleep(10)
+            waited += 10
+            gone = probe(pid)
+        }
+        sampler.stop()
+        #expect(gone.result == -1 && gone.error == ESRCH, "top pid \(pid) survived: \(gone)")
+    }
+
+    /// Sleep and display-off end the child: the suspended state costs nothing, and the wake starts
+    /// a fresh one.
+    @Test func suspendTerminatesTheTopChild() async throws {
+        let sampler = MetricsSampler(cadenceScale: 0.05)
+        sampler.start(onBatch: { _ in })
+        sampler.register(.panel)
+        let pid = try #require(
+            try await waitForTopChild(sampler, present: true, timeoutMs: 1500),
+            "no top child within 1.5 s of the panel opening")
+        #expect(probe(pid).result == 0)
+
+        sampler.suspend(reason: .systemSleep)
+        var gone = probe(pid)
+        var waited = 0
+        while gone.result == 0 && waited < 1000 {
+            try await sleep(10)
+            waited += 10
+            gone = probe(pid)
+        }
+        #expect(gone.result == -1 && gone.error == ESRCH, "top pid \(pid) survived the suspend: \(gone)")
+        #expect(sampler.topChildPID() == nil, "the stream still holds a child after the suspend")
+
+        sampler.resume(reason: .systemSleep)
+        let fresh = try await waitForTopChild(sampler, present: true, timeoutMs: 1500)
+        sampler.stop()
+        #expect(fresh != nil, "no new top child within 1.5 s of the resume")
+        if let fresh { #expect(fresh != pid) }
     }
 }
