@@ -130,20 +130,32 @@ enum ProcessKernel {
 ///
 /// Memory is the physical footprint. CPU is percent of one core and can exceed 100 (D-11). The
 /// first reading of an identity has memory and a nil CPU; CPU is known from the second on (D-20).
+/// Everything kept per process is keyed by identity and pruned to the processes alive at each
+/// sample, so the bookkeeping is bounded by the live process set (T-02-09).
 public final class ProcessCollector {
-    private struct Baseline {
+    private struct Tracked {
         var cpuNanos: UInt64
         var wall: UInt64
+        /// The last CPU percent measured over a full window; carried through short windows.
+        var lastCPU: Double?
+        var path: String?
     }
 
     private let sources: ProcessSources
-    private var baselines: [ProcessIdentity: Baseline] = [:]
+    private let minimumCPUWindowNanos: UInt64
+    private var tracked: [ProcessIdentity: Tracked] = [:]
     private var sequence: UInt64 = 0
     private var cpuReadySeen = false
 
-    public init(sources: ProcessSources = .live) {
+    /// A CPU window shorter than `minimumCPUWindowNanos` is noise: the identity keeps its last
+    /// value and its baseline, so the next full window is measured from the older reading.
+    public init(sources: ProcessSources = .live, minimumCPUWindowNanos: UInt64 = 500_000_000) {
         self.sources = sources
+        self.minimumCPUWindowNanos = minimumCPUWindowNanos
     }
+
+    /// How many identities hold a baseline and a cached path. Bounded by the live process set.
+    var trackedIdentityCount: Int { tracked.count }
 
     /// Own-uid processes only; other users arrive in plan 02-06. `.unavailable` when the kernel
     /// table could not be read, never an empty list standing in for a failure.
@@ -152,32 +164,51 @@ public final class ProcessCollector {
         let now = sources.now()
         var samples: [ProcessSample] = []
         samples.reserveCapacity(entries.count / 2)
+        var seen = Set<ProcessIdentity>()
+        seen.reserveCapacity(entries.count / 2)
         var anyCPU = false
         for entry in entries where entry.uid == sources.selfUID {
             let pid = entry.identity.pid
             // A process that exited between the table read and now has no usage: skip it.
             guard let usage = sources.usage(pid) else { continue }
+            seen.insert(entry.identity)
+            var item: Tracked
             var cpu: Double?
-            if let base = baselines[entry.identity], now > base.wall {
-                let used = usage.cpuNanos >= base.cpuNanos ? usage.cpuNanos - base.cpuNanos : 0
-                cpu = Double(used) / Double(now - base.wall) * 100
-                anyCPU = true
+            if let known = tracked[entry.identity] {
+                item = known
+                if now > known.wall, now - known.wall >= minimumCPUWindowNanos {
+                    let used = usage.cpuNanos >= known.cpuNanos ? usage.cpuNanos - known.cpuNanos : 0
+                    cpu = Double(used) / Double(now - known.wall) * 100
+                    item.cpuNanos = usage.cpuNanos
+                    item.wall = now
+                    item.lastCPU = cpu
+                } else {
+                    cpu = known.lastCPU
+                }
+            } else {
+                // First sight: a baseline, and the path is resolved once for this identity.
+                item = Tracked(cpuNanos: usage.cpuNanos, wall: now, lastCPU: nil, path: sources.path(pid))
             }
-            baselines[entry.identity] = Baseline(cpuNanos: usage.cpuNanos, wall: now)
+            if cpu != nil { anyCPU = true }
+            tracked[entry.identity] = item
             samples.append(
                 ProcessSample(
                     identity: entry.identity, ppid: entry.ppid, uid: entry.uid,
-                    path: sources.path(pid), command: entry.command,
+                    path: item.path, command: entry.command,
                     cpuPercent: cpu, footprintBytes: usage.footprintBytes))
+        }
+        // Every seen identity is tracked, so equal counts mean equal sets.
+        if tracked.count > seen.count {
+            tracked = tracked.filter { seen.contains($0.key) }
         }
         if anyCPU { cpuReadySeen = true }
         sequence += 1
         return .value(ProcessSnapshot(sequence: sequence, processes: samples, cpuReady: cpuReadySeen))
     }
 
-    /// Forgets every baseline: the next sample is a baseline again.
+    /// Forgets every baseline and cached path: the next sample is a baseline again.
     public func reset() {
-        baselines.removeAll()
+        tracked.removeAll()
         cpuReadySeen = false
     }
 }

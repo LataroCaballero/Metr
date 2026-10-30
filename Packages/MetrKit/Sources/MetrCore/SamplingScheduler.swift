@@ -107,6 +107,10 @@ public final class SamplingScheduler: @unchecked Sendable {
         let newPlan = makePlan()
         guard newPlan != plan else { return }
         plan = newPlan
+        // A metric that leaves the plan forgets when it was last read, so one that re-enters
+        // (the process list when the panel reopens) is due at once instead of waiting out a
+        // cadence measured from before the close (RESEARCH Pitfall 5).
+        lastSampled = lastSampled.filter { plan.cadence[$0.key] != nil }
         onPlanChange?(plan)
         guard plan.baseInterval != nil else {
             primePending = false

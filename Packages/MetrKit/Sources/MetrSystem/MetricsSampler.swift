@@ -14,12 +14,16 @@ public final class MetricsSampler: @unchecked Sendable {
     private let cpu = CPUCollector()  // confined to `queue`
     private let memory = MemoryCollector()  // confined to `queue`
     private let disk = DiskCollector()  // confined to `queue`
-    private let processes = ProcessCollector()  // confined to `queue`
+    private let processes: ProcessCollector  // confined to `queue`
     private var registry = DemandRegistry()  // confined to `queue`
     private var diagnostics: (@Sendable (String) -> Void)?  // confined to `queue`
+    private var emit: (@Sendable (MetricsBatch) -> Void)?  // confined to `queue`
 
     public init(cadenceScale: Double = 1) {
         scheduler = SamplingScheduler(queue: queue, cadenceScale: cadenceScale)
+        // The CPU window floor scales with the cadence, like the scheduler's own.
+        let scale = min(max(cadenceScale, SamplingPlan.scaleRange.lowerBound), SamplingPlan.scaleRange.upperBound)
+        processes = ProcessCollector(minimumCPUWindowNanos: UInt64(500_000_000 * scale))
     }
 
     /// Starts the scheduler. `diagnostics` receives plain log lines (never user-facing).
@@ -29,6 +33,7 @@ public final class MetricsSampler: @unchecked Sendable {
     ) {
         queue.async {
             self.diagnostics = diagnostics
+            self.emit = onBatch
             self.cpu.resetBaseline()
             self.scheduler.onPlanChange = { plan in
                 diagnostics?(Self.describe(plan))
@@ -71,6 +76,13 @@ public final class MetricsSampler: @unchecked Sendable {
     public func cancel(_ consumer: DemandConsumer) {
         queue.async {
             if self.registry.cancel(consumer) {
+                if self.registry.active.isEmpty {
+                    // Nothing wants processes any more (D-20): drop the baselines and hand the
+                    // store a pending reading, so a later open never shows stale numbers. Both
+                    // run on this serial queue, ahead of any later baseline.
+                    self.processes.reset()
+                    self.emit?(MetricsBatch(processes: .pending, elapsed: 0))
+                }
                 self.scheduler.setDemand(self.registry.active)
             }
         }
