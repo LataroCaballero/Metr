@@ -59,16 +59,34 @@ private struct RingsSection: View {
 
     private var cpuColumn: some View {
         let title = String(localized: "CPU")
-        let value = store.cpu.value.map { text.percent($0.total) }
+        let reading = store.cpu.value
+        let value = reading.map { text.percent($0.total) }
+        let user = reading.map { text.percent($0.user) }
+        let system = reading.map { text.percent($0.system) }
+        var failed = false
+        if case .unavailable = store.cpu { failed = true }
+        let spoken: String
+        if let value, let user, let system {
+            spoken = "\(value). " + String(localized: "User \(user), system \(system).")
+        } else {
+            spoken = unavailable
+        }
         return MetricColumn(
             symbol: "cpu",
             title: title,
-            fill: store.cpu.value?.total,
+            fill: reading?.total,
             tint: TintLogic.cpu(),
             value: valueText(value),
-            detail: value == nil ? unavailable : "",
-            accessibilityReading: value ?? unavailable
-        )
+            // Pending shows the em dash alone; only a failed read says "Unavailable" (E1).
+            detail: failed ? unavailable : nil,
+            accessibilityReading: spoken
+        ) {
+            VStack(spacing: 4) {
+                KeyValueRow(label: String(localized: "User"), value: user)
+                KeyValueRow(label: String(localized: "System"), value: system)
+            }
+            .padding(.top, 4)
+        }
     }
 
     private var memoryColumn: some View {
@@ -135,5 +153,25 @@ private struct RingsSection: View {
         case .warn: String(localized: "Elevated pressure")
         case .critical: String(localized: "Critical pressure")
         }
+    }
+}
+
+/// One 11 pt row in the CPU column: label leading, number trailing (UI-SPEC "CPU column").
+/// A missing value is the em dash, never a fabricated 0.
+private struct KeyValueRow: View {
+    let label: String
+    let value: String?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(verbatim: label)
+                .foregroundStyle(Color.secondary)
+            Spacer(minLength: 4)
+            Text(verbatim: value ?? "—")
+                .foregroundStyle(Color.primary)
+                .monospacedDigit()
+        }
+        .font(.subheadline)
+        .lineLimit(1)
     }
 }

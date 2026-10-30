@@ -51,6 +51,8 @@ final class MetricsStore {
         "batch cpu=\(text(cpu.value.map(\.total), cpu)) mem=\(text(memory.value?.ringFill, memory))"
             + " disk=\(text(disk.value?.usedFraction, disk))"
             + " diskfree=\(freeBytesText(disk))"
+            // PANEL-01: the CPU split, for scripts/verify/cpu-vs-top.sh. DEBUG log only.
+            + " cpuuser=\(text(cpu.value.map(\.user), cpu)) cpusys=\(text(cpu.value.map(\.system), cpu))"
     }
 
     /// Whole bytes free, for scripts/verify/disk-live.sh. DEBUG log only.

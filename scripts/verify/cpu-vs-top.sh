@@ -2,7 +2,8 @@
 # Usage: scripts/verify/cpu-vs-top.sh
 # CPU-01 accuracy: runs the Debug app (the shipping CPUCollector -> MetricsSampler -> MetricsStore
 # pipeline) under a steady 4-process load and compares its logged CPU % with top's (100 - idle)
-# over the same window. Prints "CPU-VS-TOP OK app=<v> top=<v> diff=<v>" or "FAIL: <what>".
+# over the same window, and its logged user and system % with top's user and sys (PANEL-01).
+# Prints "CPU-VS-TOP OK app=<v> top=<v> diff=<v> user=<app>/<top> sys=<app>/<top>" or "FAIL: <what>".
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -37,7 +38,8 @@ top -l 9 -s 2 -n 0 > "$TOP_OUT" &
 pids+=("$!")
 TOP_PID="$!"
 
-bash scripts/verify/run-debug.sh 16 cpu-vs-top --expect 'batch cpu=[01]\.[0-9]{2}' --min 5
+bash scripts/verify/run-debug.sh 16 cpu-vs-top --expect 'batch cpu=[01]\.[0-9]{2}' --min 5 \
+  --args -MetrDidPresentWelcome YES
 
 wait "$TOP_PID" 2>/dev/null || true
 
@@ -51,10 +53,30 @@ app_mean="$(grep -E 'batch cpu=[01]\.[0-9]{2}' "$APP_LOG" | sed '1d' \
   | sed -E 's/.*batch cpu=([01]\.[0-9]+).*/\1/' \
   | awk '{ s += $1 * 100; n++ } END { if (n == 0) exit 1; printf "%.2f", s / n }')" || fail "no usable batch lines in $APP_LOG"
 
-diff="$(awk -v a="$app_mean" -v t="$top_mean" 'BEGIN { d = a - t; if (d < 0) d = -d; printf "%.2f", d }')"
+# top: mean of the user and sys percentages over the same samples (first one discarded).
+read -r top_user top_sys < <(grep -E '^CPU usage:' "$TOP_OUT" | sed '1d' \
+  | awk '{ for (i = 1; i <= NF; i++) { if ($i == "user,") { v = $(i - 1); sub(/%/, "", v); u += v }
+                                       if ($i == "sys,")  { v = $(i - 1); sub(/%/, "", v); y += v } }
+           n++ }
+         END { if (n == 0) exit 1; printf "%.2f %.2f\n", u / n, y / n }') || fail "no usable user/sys in $TOP_OUT"
 
-if awk -v d="$diff" -v tol="$TOLERANCE" 'BEGIN { exit !(d > tol) }'; then
-  fail "app=$app_mean top=$top_mean diff=$diff exceeds $TOLERANCE points"
-fi
+# app: the cpuuser= and cpusys= tokens of the same batch lines (first skipped), x 100.
+app_user="$(grep -E 'cpuuser=[01]\.[0-9]{2} cpusys=' "$APP_LOG" | sed '1d' \
+  | sed -E 's/.*cpuuser=([01]\.[0-9]+).*/\1/' \
+  | awk '{ s += $1 * 100; n++ } END { if (n == 0) exit 1; printf "%.2f", s / n }')" || fail "no cpuuser tokens in $APP_LOG"
+app_sys="$(grep -E 'cpuuser=[01]\.[0-9]{2} cpusys=' "$APP_LOG" | sed '1d' \
+  | sed -E 's/.*cpusys=([01]\.[0-9]+).*/\1/' \
+  | awk '{ s += $1 * 100; n++ } END { if (n == 0) exit 1; printf "%.2f", s / n }')" || fail "no cpusys tokens in $APP_LOG"
 
-echo "CPU-VS-TOP OK app=$app_mean top=$top_mean diff=$diff"
+absdiff() { awk -v a="$1" -v b="$2" 'BEGIN { d = a - b; if (d < 0) d = -d; printf "%.2f", d }'; }
+exceeds() { awk -v d="$1" -v tol="$TOLERANCE" 'BEGIN { exit !(d > tol) }'; }
+
+diff="$(absdiff "$app_mean" "$top_mean")"
+user_diff="$(absdiff "$app_user" "$top_user")"
+sys_diff="$(absdiff "$app_sys" "$top_sys")"
+
+exceeds "$diff" && fail "app=$app_mean top=$top_mean diff=$diff exceeds $TOLERANCE points"
+exceeds "$user_diff" && fail "user app=$app_user top=$top_user diff=$user_diff exceeds $TOLERANCE points"
+exceeds "$sys_diff" && fail "sys app=$app_sys top=$top_sys diff=$sys_diff exceeds $TOLERANCE points"
+
+echo "CPU-VS-TOP OK app=$app_mean top=$top_mean diff=$diff user=$app_user/$top_user sys=$app_sys/$top_sys"

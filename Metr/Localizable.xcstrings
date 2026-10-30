@@ -348,6 +348,42 @@
           }
         }
       }
+    },
+    "User": {
+      "comment": "CPU column row label: share of CPU time spent in user processes (PANEL-01)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usuario"
+          }
+        }
+      }
+    },
+    "System": {
+      "comment": "CPU column row label: share of CPU time spent in the kernel and system (PANEL-01)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sistema"
+          }
+        }
+      }
+    },
+    "User %@, system %@.": {
+      "comment": "VoiceOver reading of the CPU column's user and system percentages",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usuario %1$@, sistema %2$@."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
