@@ -40,6 +40,7 @@ enum DebugSnapshotRenderer {
                             usedBytes: 12_025_908_428, totalBytes: totalMemory,
                             swapUsedBytes: 0, freePercent: 60, pressure: .normal)),
                     disk: .value(DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)),
+                    processes: columnProcesses,
                     elapsed: 1)),
             // Worst case for width: 3-digit percents, Critical sentence, swap, 7 of 245 GB free.
             // The system share carries the whole 100 % so the longest "System 100 %" row is on screen.
@@ -58,6 +59,7 @@ enum DebugSnapshotRenderer {
                             usedBytes: 16_500_000_000, totalBytes: totalMemory,
                             swapUsedBytes: 4_294_967_296, freePercent: 3, pressure: .critical)),
                     disk: .value(DiskReading(totalBytes: 245_000_000_000, availableBytes: 7_000_000_000)),
+                    processes: columnProcesses,
                     elapsed: 1),
                 thermal: .critical),
             // Elevated everywhere: memory warn with swap, disk under 10 % free, thermal Elevated.
@@ -76,6 +78,7 @@ enum DebugSnapshotRenderer {
                             usedBytes: 13_500_000_000, totalBytes: totalMemory,
                             swapUsedBytes: 1_288_490_189, freePercent: 12, pressure: .warn)),
                     disk: .value(DiskReading(totalBytes: 494_000_000_000, availableBytes: 39_500_000_000)),
+                    processes: columnProcesses,
                     elapsed: 1),
                 thermal: .elevated),
             // Three core tiers, in the order the reader reports them (Super, Performance, Efficiency).
@@ -95,6 +98,7 @@ enum DebugSnapshotRenderer {
                             usedBytes: 9_000_000_000, totalBytes: totalMemory,
                             swapUsedBytes: 0, freePercent: 45, pressure: .normal)),
                     disk: .value(DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)),
+                    processes: columnProcesses,
                     elapsed: 1)),
             // First sample not in yet: CPU shows the em dash and track-only bars named by the system.
             Fixture(
@@ -106,10 +110,13 @@ enum DebugSnapshotRenderer {
                             usedBytes: 12_025_908_428, totalBytes: totalMemory,
                             swapUsedBytes: 0, freePercent: 60, pressure: .normal)),
                     disk: .value(DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)),
+                    processes: firstFrameProcesses,
                     elapsed: 1)),
             Fixture(
                 name: "unavailable",
-                batch: MetricsBatch(cpu: .unavailable, memory: .unavailable, disk: .unavailable, elapsed: 1)),
+                batch: MetricsBatch(
+                    cpu: .unavailable, memory: .unavailable, disk: .unavailable, processes: .unavailable,
+                    elapsed: 1)),
             // The Top Apps list with a multi-process browser, system apps and a busy tool
             // (PANEL-04, PROC-02, PROC-03). Synthetic values; the Chrome members sum to 182 % and 2.1 GB.
             Fixture(name: "apps", batch: appsBatch(processes: appsSnapshot)),
@@ -176,9 +183,28 @@ enum DebugSnapshotRenderer {
         return snapshot
     }
 
-    /// Synthetic own-uid processes for the `apps` fixture: Chrome with its helpers, three system
-    /// apps, a compiler and Xcode.
+    /// The process reading the column fixtures carry, so no panel render shows an empty list area
+    /// (D-20): the `apps` own-uid samples, CPU-ready.
+    private static var columnProcesses: Reading<ProcessSnapshot> { .value(appsSnapshot) }
+
+    /// D-20's first frame: the same samples with no CPU yet, so the list is memory-sorted, the CPU
+    /// column reads the em dash and Memory is the emphasized one.
+    private static var firstFrameProcesses: Reading<ProcessSnapshot> {
+        let samples = appsSamples.map { sample -> ProcessSample in
+            var pending = sample
+            pending.cpuPercent = nil
+            return pending
+        }
+        return .value(ProcessSnapshot(sequence: 1, processes: samples, cpuReady: false))
+    }
+
     private static var appsSnapshot: ProcessSnapshot {
+        ProcessSnapshot(sequence: 1, processes: appsSamples, cpuReady: true)
+    }
+
+    /// Synthetic own-uid processes shared by the `apps` fixture and the column fixtures: Chrome
+    /// with its helpers, three system apps, a compiler and Xcode.
+    private static var appsSamples: [ProcessSample] {
         let me = getuid()
         let mib: UInt64 = 1_048_576
         var next: Int32 = 1_000
@@ -211,7 +237,7 @@ enum DebugSnapshotRenderer {
         add("/Applications/Safari.app/Contents/MacOS/Safari", "Safari", cpu: 9, mib: 610)
         add("/usr/bin/swift-frontend", "swift-frontend", cpu: 140, mib: 1_400)
         add("/Applications/Xcode.app/Contents/MacOS/Xcode", "Xcode", cpu: 22, mib: 2_400)
-        return ProcessSnapshot(sequence: 1, processes: samples, cpuReady: true)
+        return samples
     }
 
     static func renderAndExit(to directory: URL) {

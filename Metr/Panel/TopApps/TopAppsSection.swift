@@ -73,8 +73,6 @@ struct TopAppsSection: View {
                         if row.moreCount > 0 { MoreLine(count: row.moreCount) }
                     }
                 }
-            case .waiting:
-                Color.clear.frame(height: 0)
             case .unavailable:
                 Text("App list unavailable.")
                     .font(.subheadline)

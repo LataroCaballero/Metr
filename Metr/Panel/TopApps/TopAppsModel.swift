@@ -8,9 +8,7 @@ struct TopAppsDisplay: Equatable {
     enum Content: Equatable {
         /// Up to five rows, in display order.
         case rows([TopAppRowData])
-        /// No reading yet: the reserved area stays empty (no spinner, no skeleton).
-        case waiting
-        /// The process list cannot be read at all (E5 error).
+        /// The process list is not available: "App list unavailable." inside the reserved area (E5 error).
         case unavailable
     }
 
@@ -145,9 +143,11 @@ final class TopAppsModel {
     /// at once even while frozen (an explicit user action, D-06).
     func display(for reading: Reading<ProcessSnapshot>, sort: SortColumn) -> TopAppsDisplay {
         switch reading {
-        case .pending:
-            return TopAppsDisplay(content: .waiting, effectiveSort: .memory)
-        case .unavailable:
+        case .pending, .unavailable:
+            // D-20 and E5: the open is held until the first reading (`PanelOpenGate`), so a pending
+            // reading can be on screen only after the bounded wait ended with none. To the user that
+            // is the total-failure state: one line in the reserved area, replaced in place by the
+            // rows when the reading lands. Never an empty area, a spinner or a skeleton.
             return TopAppsDisplay(content: .unavailable, effectiveSort: sort)
         case .value(let snapshot):
             guard !snapshot.processes.isEmpty else {

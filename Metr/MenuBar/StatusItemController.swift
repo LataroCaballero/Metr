@@ -25,11 +25,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
     /// Rejects an open request that arrives right after a close, so a click on the rings while the
     /// panel is open closes it without reopening it (RESEARCH A8).
     private var toggleGuard = PopoverToggleGuard()
-    /// True while a click is waiting for the first readings (cold start, at most `coldStartWait`).
+    /// True while a click is waiting for the first readings (at most `PanelOpenGate`'s bound).
     private var pendingOpen = false
     /// Identifies the current pending open, so a stale deadline cannot complete a newer one.
     private var pendingOpenToken = 0
-    private static let coldStartWait: TimeInterval = 1.5
 
     init(store: MetricsStore, sampler: MetricsSampler) {
         self.store = store
@@ -148,36 +147,49 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
             popover.performClose(nil)
         } else if pendingOpen {
             // A second click while waiting for data cancels the pending open.
-            pendingOpen = false
+            abandonPendingOpen()
         } else if toggleGuard.shouldOpen(at: ProcessInfo.processInfo.systemUptime) {
             openPanel()
         }
     }
 
-    /// Shows the panel now when every metric has answered, otherwise waits for the first ready
-    /// batch or `coldStartWait`, whichever comes first. The wait is a timer, never a block, and the
-    /// panel shows an em dash for anything still missing (never 0 and never a spinner).
+    /// Opens the panel through `PanelOpenGate` (D-20): shows it now when the rings and the first
+    /// process reading are in, otherwise holds the open for the gate's bound and then shows it
+    /// whatever has arrived. The wait is a timer, never a block. Demand is registered at click
+    /// time, so the process baseline is taken while the click is held and the list is filled on the
+    /// first frame. A reading still missing when the bound ends shows the unavailable line in the
+    /// reserved list area, never an empty area and never a spinner.
     private func openPanel() {
-        if store.isReadyForPanel {
+        sampler.register(.panel)
+        switch PanelOpenGate.decide(ringsReady: store.isReadyForPanel, processesReady: store.processes != .pending) {
+        case .showNow:
             showPanel()
-            return
-        }
-        pendingOpen = true
-        pendingOpenToken += 1
-        let token = pendingOpenToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.coldStartWait) { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, self.pendingOpen, self.pendingOpenToken == token else { return }
-                self.pendingOpen = false
-                self.showPanel()
+        case .wait(let seconds):
+            pendingOpen = true
+            pendingOpenToken += 1
+            let token = pendingOpenToken
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.pendingOpen, self.pendingOpenToken == token else { return }
+                    self.pendingOpen = false
+                    self.showPanel()
+                }
             }
         }
     }
 
     private func completePendingOpenIfReady() {
-        guard pendingOpen, store.isReadyForPanel else { return }
+        guard pendingOpen, store.isReadyForPanel, store.processes != .pending else { return }
         pendingOpen = false
         showPanel()
+    }
+
+    /// Drops a pending open that will not show (a second click, the right-click menu) and releases
+    /// the demand it registered, so no process sampling lingers without a panel (T-02-24).
+    private func abandonPendingOpen() {
+        guard pendingOpen else { return }
+        pendingOpen = false
+        if !popover.isShown { sampler.cancel(.panel) }
     }
 
     /// Builds the panel content for one presentation. SwiftUI content that stays alive inside a
@@ -205,7 +217,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
     /// Temporarily assigns the menu so the button presents it, then clears it in `menuDidClose`
     /// so left clicks keep reaching the action (RESEARCH A4).
     private func showMenu() {
-        pendingOpen = false
+        abandonPendingOpen()
         if popover.isShown { popover.performClose(nil) }
         guard let button = statusItem.button else { return }
         let menu = RightClickMenu.make(target: self)
