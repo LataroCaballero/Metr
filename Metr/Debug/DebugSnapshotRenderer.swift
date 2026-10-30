@@ -13,7 +13,19 @@ enum DebugSnapshotRenderer {
         let name: String
         let batch: MetricsBatch
         var thermal: ThermalLevel = .normal
+        /// The Top Apps group to render open, by row id (the app bundle path).
+        var expanded: String?
+        /// Row action states to render, by row id (Quitting, Did not quit, Confirming).
+        var actionStates: [String: RowActionState] = [:]
+
+        /// True when the fixture needs a preset Top Apps model.
+        var presetsRows: Bool { expanded != nil || !actionStates.isEmpty }
     }
+
+    /// Row ids of the apps the new fixtures put into a state: the app bundle path (`ProcessGroup.id`).
+    private static let chromeID = "/Applications/Google Chrome.app"
+    private static let textEditID = "/Applications/TextEdit.app"
+    private static let safariID = "/Applications/Safari.app"
 
     private static let totalMemory: UInt64 = 17_179_869_184
 
@@ -125,11 +137,27 @@ enum DebugSnapshotRenderer {
             Fixture(name: "apps-system", batch: appsBatch(processes: appsSystemSnapshot)),
             // System processes could not be read: own rows only and the footer says so (E5 partial).
             Fixture(name: "apps-partial", batch: appsBatch(processes: appsPartialSnapshot)),
+            // Chrome open: its three heaviest helpers and "and 11 more…" (D-08, PROC-02).
+            Fixture(name: "apps-expanded", batch: appsBatch(processes: appsSnapshot), expanded: chromeID),
+            // The worst-case height: a group open and a Force Quit confirmation open on TextEdit (E5 populated).
+            Fixture(
+                name: "apps-confirm", batch: appsBatch(processes: appsTextEditSnapshot),
+                expanded: chromeID, actionStates: [textEditID: .confirming]),
+            // TextEdit is quitting and Safari did not quit, so it offers Force Quit… (D-15).
+            Fixture(
+                name: "apps-quitting", batch: appsBatch(processes: appsTextEditSnapshot),
+                actionStates: [textEditID: .quitting(startedAt: 0), safariID: .didNotQuit]),
+            // The process list cannot be read at all: one quiet line in the reserved area (E5 error).
+            Fixture(name: "apps-error", batch: appsBatch(reading: .unavailable)),
         ]
     }
 
     /// The batch shared by the Top Apps fixtures: a busy-but-normal Mac with the given process reading.
     private static func appsBatch(processes: ProcessSnapshot) -> MetricsBatch {
+        appsBatch(reading: .value(processes))
+    }
+
+    private static func appsBatch(reading processes: Reading<ProcessSnapshot>) -> MetricsBatch {
         MetricsBatch(
             cpu: .value(
                 CPUReading(
@@ -143,7 +171,7 @@ enum DebugSnapshotRenderer {
                     usedBytes: 12_025_908_428, totalBytes: totalMemory,
                     swapUsedBytes: 0, freePercent: 60, pressure: .normal)),
             disk: .value(DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)),
-            processes: .value(processes),
+            processes: processes,
             elapsed: 1)
     }
 
@@ -174,6 +202,19 @@ enum DebugSnapshotRenderer {
             system(302, uid: 0, path: agent + "/Helpers/Agent Updater", "Agent Updater", cpu: 8, mib: 40),
         ]
         return ProcessSnapshot(sequence: 1, processes: rows + own, cpuReady: true, otherUsers: .available)
+    }
+
+    /// The `apps` rows plus TextEdit at 15 %, so it ranks fourth by CPU and the top five are Chrome,
+    /// swift-frontend, Xcode, TextEdit and Safari: both rows the state fixtures act on are visible.
+    private static var appsTextEditSnapshot: ProcessSnapshot {
+        var samples = appsSamples
+        let pid: Int32 = 2_000
+        samples.append(
+            ProcessSample(
+                identity: ProcessIdentity(pid: pid, startMicros: Int64(pid) * 1_000),
+                ppid: 1, uid: getuid(), path: "/Applications/TextEdit.app/Contents/MacOS/TextEdit",
+                command: "TextEdit", cpuPercent: 15, footprintBytes: 180 * 1_048_576))
+        return ProcessSnapshot(sequence: 1, processes: samples, cpuReady: true)
     }
 
     /// `apps-partial`: the `apps` rows with the other-users half unavailable.
@@ -252,8 +293,20 @@ enum DebugSnapshotRenderer {
                 store.apply(fixture.batch)
                 store.applyThermal(fixture.thermal)
                 let name = "panel-\(language)-\(fixture.name)-\(scheme == .dark ? "dark" : "light").png"
-                if write(PanelView(store: store), scheme: scheme, to: directory.appending(path: name)) {
-                    DebugHooks.log("rendered \(name)")
+                var topApps: TopAppsModel?
+                if fixture.presetsRows {
+                    let model = TopAppsModel()
+                    // A preset model answers `.allowed` for every row, so what is drawn does not
+                    // depend on which synthetic pids exist on this machine.
+                    model.preset(
+                        expanded: fixture.expanded, actionStates: fixture.actionStates, availability: .allowed)
+                    topApps = model
+                }
+                if let height = write(
+                    PanelView(store: store, topApps: topApps), scheme: scheme,
+                    to: directory.appending(path: name))
+                {
+                    DebugHooks.log("rendered \(name) height=\(Int(height.rounded(.up)))")
                     panelCount += 1
                 }
             }
@@ -262,7 +315,7 @@ enum DebugSnapshotRenderer {
             for scheme in [ColorScheme.light, .dark] {
                 let name = "welcome-\(language)-\(state)-\(scheme == .dark ? "dark" : "light").png"
                 let view = WelcomeView(onDone: {}, usedFallback: usedFallback)
-                if write(view, scheme: scheme, to: directory.appending(path: name)) {
+                if write(view, scheme: scheme, to: directory.appending(path: name)) != nil {
                     DebugHooks.log("rendered \(name)")
                     welcomeCount += 1
                 }
@@ -273,8 +326,9 @@ enum DebugSnapshotRenderer {
         NSApp.terminate(nil)
     }
 
-    /// The backdrop exists only in the renderer, standing in for the popover's glass.
-    private static func write(_ content: some View, scheme: ColorScheme, to url: URL) -> Bool {
+    /// The backdrop exists only in the renderer, standing in for the popover's glass. Returns the
+    /// height of the written image in points, or nil when nothing was written.
+    private static func write(_ content: some View, scheme: ColorScheme, to url: URL) -> CGFloat? {
         let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
         var backdrop = NSColor.windowBackgroundColor
         appearance?.performAsCurrentDrawingAppearance {
@@ -286,9 +340,10 @@ enum DebugSnapshotRenderer {
         let renderer = ImageRenderer(content: view)
         renderer.scale = 2
         guard let image = renderer.cgImage,
-            let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
-        else { return false }
-        return (try? png.write(to: url)) != nil
+            let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]),
+            (try? png.write(to: url)) != nil
+        else { return nil }
+        return CGFloat(image.height) / renderer.scale
     }
 }
 #endif

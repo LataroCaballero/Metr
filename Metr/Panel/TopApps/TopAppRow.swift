@@ -191,8 +191,7 @@ struct AppRow: View {
     @ViewBuilder
     private func actionSlot(label: String) -> some View {
         if isWorking {
-            ProgressView()
-                .controlSize(.small)
+            workingIndicator
                 .frame(width: 20)
                 .accessibilityHidden(true)
         } else if canQuit {
@@ -213,6 +212,21 @@ struct AppRow: View {
         } else {
             Color.clear.frame(width: 20)
         }
+    }
+
+    /// The small spinner of a Quitting row. It is an AppKit view, which `ImageRenderer` draws as a
+    /// "prohibited" badge, so the debug renderer gets a clear view instead. Compiled out of Release.
+    @ViewBuilder
+    private var workingIndicator: some View {
+        #if DEBUG
+        if DebugSnapshotRenderer.isRendering {
+            Color.clear
+        } else {
+            ProgressView().controlSize(.small)
+        }
+        #else
+        ProgressView().controlSize(.small)
+        #endif
     }
 
     /// The name, then the lock of a system row right after it. Both sit inside the flexible name

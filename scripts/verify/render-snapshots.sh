@@ -6,7 +6,10 @@
 # Data-driven: the renderer logs "rendered-total panel=<n> welcome=<m>" per language run. The gate
 # fails when that line is missing, when the PNGs on disk differ from the logged totals, when fewer
 # than 12 panel PNGs exist or when the welcome count is not exactly 8.
-# Prints "RENDER-SNAPSHOTS OK dir=<path> panel=<n> welcome=<m>".
+# Height gate (UI-SPEC "Height budget"): every panel PNG is at most 700 pt tall (pixelHeight / 2, the
+# renderer draws at scale 2), and the collapsed Top Apps list (panel-*-apps-{light,dark}.png) is at most
+# 583 pt: the 559 pt budget plus the 24 pt margin past which a taller list is a layout bug.
+# Prints "RENDER-SNAPSHOTS OK dir=<path> panel=<n> welcome=<m> max_height=<pt>".
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -46,4 +49,26 @@ welcome="$(find "$DIR" -name 'welcome-*.png' -size +0 | wc -l | tr -d ' ')"
 [ "$welcome" = "$welcome_sum" ] || { echo "FAIL: renderer logged $welcome_sum welcome PNGs but $DIR holds $welcome" >&2; exit 1; }
 [ "$welcome_sum" = "8" ] || { echo "FAIL: expected exactly 8 welcome PNGs, the renderer wrote $welcome_sum" >&2; exit 1; }
 
-echo "RENDER-SNAPSHOTS OK dir=$DIR panel=$count welcome=$welcome"
+# Height ceiling. `sips` reports pixels; the images are drawn at scale 2.
+CEILING=700
+COLLAPSED_BUDGET=583
+max_height=0
+for f in "$DIR"/panel-*.png; do
+  px="$(sips -g pixelHeight "$f" | awk '/pixelHeight/ {print $2}')"
+  [ -n "$px" ] || { echo "FAIL: could not read pixelHeight of $f" >&2; exit 1; }
+  pt=$(( (px + 1) / 2 ))
+  [ "$pt" -le "$max_height" ] || max_height="$pt"
+  if [ "$pt" -gt "$CEILING" ]; then
+    echo "FAIL: $(basename "$f") is $pt pt, over the $CEILING pt ceiling" >&2
+    exit 1
+  fi
+  case "$(basename "$f")" in
+    panel-*-apps-light.png|panel-*-apps-dark.png)
+      if [ "$pt" -gt "$COLLAPSED_BUDGET" ]; then
+        echo "FAIL: $(basename "$f") is $pt pt, over the $COLLAPSED_BUDGET pt collapsed-list budget" >&2
+        exit 1
+      fi ;;
+  esac
+done
+
+echo "RENDER-SNAPSHOTS OK dir=$DIR panel=$count welcome=$welcome max_height=$max_height"

@@ -139,6 +139,30 @@ final class TopAppsModel {
 
     init() {}
 
+    #if DEBUG
+    /// What every row of a preset model may do, so a fixture does not depend on whether a synthetic
+    /// pid happens to exist on the machine that renders it. nil in the app.
+    @ObservationIgnored private var presetAvailability: ActionAvailability?
+
+    /// DEBUG only, for the snapshot renderer: opens a group and puts rows into action states
+    /// (Quitting, Did not quit, Confirming) without a click or a signal. Compiled out of Release.
+    func preset(
+        expanded: String?, actionStates: [String: RowActionState], availability: ActionAvailability? = nil
+    ) {
+        expandedGroupID = expanded
+        self.actionStates = actionStates
+        presetAvailability = availability
+    }
+    #endif
+
+    /// What a process may offer, from the guard. A preset model (DEBUG) answers with its fixed value.
+    private func availability(pid: Int32, uid: UInt32, path: String?) -> ActionAvailability {
+        #if DEBUG
+        if let presetAvailability { return presetAvailability }
+        #endif
+        return guardian.availability(pid: pid, uid: uid, path: path)
+    }
+
     /// The view reports the pointer entering or leaving the list rows.
     func setPointerInList(_ inside: Bool) {
         if isPointerInList != inside { isPointerInList = inside }
@@ -315,7 +339,7 @@ final class TopAppsModel {
         let role: RowRole =
             group.appPath.map { .app(appPath: $0, main: main.identity, mainPath: main.path) }
             ?? .standalone(identity: main.identity, path: main.path)
-        return (role, guardian.availability(pid: main.identity.pid, uid: main.uid, path: main.path))
+        return (role, availability(pid: main.identity.pid, uid: main.uid, path: main.path))
     }
 
     /// Quit from the row: the route for the row's role, executed behind the guard. A refusal is a
@@ -433,15 +457,15 @@ final class TopAppsModel {
         let pid = Int(sample.identity.pid)
         let id = Self.helperID(of: sample)
         roles[id] = .helper(identity: sample.identity, path: sample.path)
-        let availability = guardian.availability(pid: sample.identity.pid, uid: sample.uid, path: sample.path)
-        availabilities[id] = availability
+        let offered = availability(pid: sample.identity.pid, uid: sample.uid, path: sample.path)
+        availabilities[id] = offered
         return HelperRowData(
             id: id,
             name: name,
             help: String(localized: "\(name) · PID \(pid)"),
             cpuPercent: sample.cpuPercent,
             footprintBytes: sample.footprintBytes,
-            availability: availability,
+            availability: offered,
             actionState: actionStates[id] ?? .rest)
     }
 

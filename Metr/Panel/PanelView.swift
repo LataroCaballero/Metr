@@ -26,6 +26,9 @@ struct PanelView: View {
     /// Esc priority: an open confirmation is cancelled before the panel closes. A fresh router by
     /// default, so `PanelView(store:)` keeps compiling.
     var escape = PanelEscapeRouter()
+    /// The Top Apps model. nil in the app, where the section owns it; the debug renderer passes a
+    /// preset one to draw every row state.
+    var topApps: TopAppsModel?
 
     /// True while the other-users half of the process list cannot be read (E5 partial): the panel
     /// says so instead of silently showing an incomplete list. Clears on the next successful read.
@@ -40,7 +43,7 @@ struct PanelView: View {
             Divider()
             StatusLine(store: store)
             Divider()
-            TopAppsSection(store: store, escape: escape)
+            TopAppsSection(store: store, escape: escape, model: topApps)
             Divider()
             HStack {
                 // The leading side holds the partial-state line; Phase 3 adds "Open Window" here.

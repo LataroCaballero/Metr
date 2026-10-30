@@ -15,8 +15,16 @@ struct TopAppsSection: View {
 
     /// The selected segment, remembered across openings (D-06). Stored as the column's raw value.
     @AppStorage("topAppsSort") private var sortRaw = SortColumn.cpu.rawValue
-    @State private var model = TopAppsModel()
+    @State private var model: TopAppsModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// `model` is nil in the app. The debug renderer passes a preset one so every row state can be
+    /// drawn without a click; the production call sites pass nothing.
+    init(store: MetricsStore, escape: PanelEscapeRouter, model: TopAppsModel? = nil) {
+        self.store = store
+        self.escape = escape
+        _model = State(initialValue: model ?? TopAppsModel())
+    }
 
     private let text = MetricText(locale: .current)
 
