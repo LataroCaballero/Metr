@@ -74,6 +74,19 @@ public final class SamplingScheduler: @unchecked Sendable {
         }
     }
 
+    /// Event-driven early sample for data that became ready between ticks; never adds a metric
+    /// the plan does not carry. Delivers `metrics` intersected with the current plan, and only
+    /// while started and not suspended, so the idle state can never gain process work (T-02-22).
+    public func deliverNow(_ metrics: Set<Metric>) {
+        queue.async {
+            guard self.started, self.suspendReasons.isEmpty, self.plan.baseInterval != nil else { return }
+            let due = metrics.intersection(self.plan.cadence.keys)
+            guard !due.isEmpty else { return }
+            let now = Self.uptime()
+            self.deliver(due: due, elapsed: self.lastDelivery.map { now - $0 } ?? 0, priming: false)
+        }
+    }
+
     public func setConstrained(_ value: Bool) {
         queue.async {
             guard self.constrained != value else { return }

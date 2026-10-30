@@ -44,6 +44,17 @@ public final class MetricsSampler: @unchecked Sendable {
                 diagnostics?(Self.describe(plan))
             }
         }
+        // Warm-up (D-20, RESEARCH Open Question 2): top's first block carries every process's
+        // memory (system rows appear about 0.2 s after the child starts) and its second carries
+        // the first valid CPU (about 2.2 s). Each triggers an early process sample instead of
+        // waiting out the 2 s cadence. `deliverNow` is a no-op unless the plan carries processes,
+        // so a stray block can never add process work to the idle state.
+        let scheduler = self.scheduler
+        topStream.setBlockHandler { block in
+            if block.sequence == 1 || block.sequence == 2 {
+                scheduler.deliverNow([.processes])
+            }
+        }
         scheduler.start(
             onTick: { [self] due, elapsed, priming in
                 // Runs on `queue`; the collectors are confined there.
