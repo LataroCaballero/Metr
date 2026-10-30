@@ -49,8 +49,15 @@ public struct TopBlock: Sendable, Equatable {
 /// Turns top's text, one line at a time, into blocks. A value type driven by the stream under a
 /// lock; it never reads a clock itself (the caller passes the arrival time), so it is testable.
 public struct TopBlockParser: Sendable {
-    /// Lines in the row section that did not match the row grammar (T-02-14).
+    /// A longer line is not top output: it is dropped and counted, never parsed (T-02-14).
+    public static let maxLineBytes = 512
+
+    /// Lines that did not match the grammar: row lines with a wrong shape, over-long lines and
+    /// partial lines dropped when the read buffer overflowed (T-02-14).
     public private(set) var rejectedRows = 0
+    /// Consecutive completed blocks with fewer than half their announced rows parsed. Two in a row
+    /// mean the output format changed (RESEARCH A2): the stream fails rather than serve a fraction.
+    public private(set) var underParsedStreak = 0
 
     private var startedAtMicros: Int64
     private var lastHeaderMicros: Int64?
@@ -71,8 +78,20 @@ public struct TopBlockParser: Sendable {
         self = TopBlockParser(startedAtMicros: startedAtMicros)
     }
 
+    /// Counts a line the caller had to drop before it reached `feed`.
+    public mutating func noteRejected() {
+        rejectedRows += 1
+    }
+
     /// Feeds one line (without its newline). Returns a block when this line completed one.
     public mutating func feed(_ line: Substring, atMicros: Int64) -> TopBlock? {
+        if line.utf8.count > Self.maxLineBytes {
+            rejectedRows += 1
+            // An over-long line in the row section still occupies a row position.
+            guard inRows else { return nil }
+            rowLines += 1
+            return rowLines >= expected ? finishBlock() : nil
+        }
         if line.hasPrefix("Processes:") {
             let finished = finishBlock()
             beginBlock(header: line, atMicros: atMicros)
@@ -109,6 +128,11 @@ public struct TopBlockParser: Sendable {
         guard inBlock else { return nil }
         inBlock = false
         inRows = false
+        if expected != Int.max, expected > 0, rows.count * 2 < expected {
+            underParsedStreak += 1
+        } else {
+            underParsedStreak = 0
+        }
         guard !rows.isEmpty else { return nil }
         let block = TopBlock(sequence: blockIndex, rows: rows, notBeforeMicros: notBefore)
         rows.removeAll(keepingCapacity: true)
@@ -181,7 +205,8 @@ public enum TopStreamState: Sendable, Equatable {
     case starting
     /// At least one block has arrived.
     case running
-    /// The child could not be launched.
+    /// The child could not be launched, ended on its own, or printed output that stopped parsing.
+    /// The stream keeps no block in this state; `start()` relaunches it.
     case failed
 }
 
@@ -262,6 +287,9 @@ public final class TopStream: TopSnapshotSource, @unchecked Sendable {
         var generation = 0
     }
 
+    /// The read buffer holds at most one partial line between reads; beyond this it is dropped.
+    static let maxBufferBytes = 1 << 20
+
     private let inner = Mutex(Inner())
     private let launcher: TopLauncher
     private let wallMicros: @Sendable () -> Int64
@@ -293,7 +321,7 @@ public final class TopStream: TopSnapshotSource, @unchecked Sendable {
     public func start() {
         let startedAt = wallMicros()
         let generation: Int? = inner.withLock { s in
-            guard s.state == .stopped else { return nil }
+            guard s.state == .stopped || s.state == .failed else { return nil }
             s.state = .starting
             s.generation += 1
             s.parser.reset(startedAtMicros: startedAt)
@@ -348,12 +376,15 @@ public final class TopStream: TopSnapshotSource, @unchecked Sendable {
 
     private func ingest(_ data: Data, generation: Int, handle: FileHandle) {
         if data.isEmpty {
-            // End of file: nothing more will arrive on this handle.
+            // End of file: nothing more will arrive on this handle. Unless stop() got here first,
+            // the child ended on its own.
             handle.readabilityHandler = nil
+            endCurrentChild(generation: generation)
             return
         }
         let now = wallMicros()
         var completed: [TopBlock] = []
+        var underParsed = false
         let handler: (@Sendable (TopBlock) -> Void)? = inner.withLock { s in
             guard s.generation == generation, s.child != nil else { return nil }
             s.buffer.append(data)
@@ -361,14 +392,46 @@ public final class TopStream: TopSnapshotSource, @unchecked Sendable {
                 let line = String(decoding: s.buffer[s.buffer.startIndex..<newline], as: UTF8.self)
                 s.buffer.removeSubrange(s.buffer.startIndex...newline)
                 if let block = s.parser.feed(Substring(line), atMicros: now) {
+                    if s.parser.underParsedStreak >= 2 {
+                        underParsed = true
+                        break
+                    }
                     s.latest = block
                     s.state = .running
                     completed.append(block)
+                } else if s.parser.underParsedStreak >= 2 {
+                    underParsed = true
+                    break
                 }
+            }
+            if s.buffer.count > Self.maxBufferBytes {
+                s.buffer.removeAll()
+                s.parser.noteRejected()
             }
             return s.handler
         }
-        guard let handler else { return }
-        for block in completed { handler(block) }
+        if let handler {
+            for block in completed { handler(block) }
+        }
+        if underParsed {
+            handle.readabilityHandler = nil
+            endCurrentChild(generation: generation)
+        }
+    }
+
+    /// Fails the stream and ends its child, unless stop() or a newer start() already replaced it.
+    private func endCurrentChild(generation: Int) {
+        let child: TopChild? = inner.withLock { s in
+            guard s.generation == generation, let child = s.child else { return nil }
+            s.child = nil
+            s.generation += 1
+            s.state = .failed
+            s.latest = nil
+            s.buffer.removeAll()
+            return child
+        }
+        guard let child else { return }
+        child.output.readabilityHandler = nil
+        child.terminate()
     }
 }

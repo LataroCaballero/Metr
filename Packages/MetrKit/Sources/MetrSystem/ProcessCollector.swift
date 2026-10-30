@@ -149,6 +149,10 @@ public final class ProcessCollector {
     private var tracked: [ProcessIdentity: Tracked] = [:]
     private var sequence: UInt64 = 0
     private var cpuReadySeen = false
+    /// Monotonic time of the last attempt to start top; a failed source waits `topRetryNanos`
+    /// from it before the next one (T-02-16).
+    private var lastTopStart: UInt64?
+    private static let topRetryNanos: UInt64 = 10_000_000_000
 
     /// A CPU window shorter than `minimumCPUWindowNanos` is noise: the identity keeps its last
     /// value and its baseline, so the next full window is measured from the older reading.
@@ -169,7 +173,7 @@ public final class ProcessCollector {
     public func sample() -> Reading<ProcessSnapshot> {
         guard let entries = sources.listAll() else { return .unavailable }
         let now = sources.now()
-        startTopIfNeeded()
+        startTopIfNeeded(now: now)
         let block = top?.latest()
         var samples: [ProcessSample] = []
         samples.reserveCapacity(entries.count / 2)
@@ -244,9 +248,25 @@ public final class ProcessCollector {
             ProcessSnapshot(sequence: sequence, processes: samples, cpuReady: cpuReady, otherUsers: otherUsers))
     }
 
-    private func startTopIfNeeded() {
+    private func startTopIfNeeded(now: UInt64) {
         guard let top else { return }
-        if top.state == .stopped { top.start() }
+        switch top.state {
+        case .stopped:
+            top.start()
+            lastTopStart = now
+        case .failed:
+            // Own rows keep ranking meanwhile. A source first seen failed waits a full interval too.
+            guard let last = lastTopStart else {
+                lastTopStart = now
+                return
+            }
+            if now >= last, now - last >= Self.topRetryNanos {
+                top.start()
+                lastTopStart = now
+            }
+        case .starting, .running:
+            break
+        }
     }
 
     private func otherUsersState(block: TopBlock?) -> OtherUsersState {
