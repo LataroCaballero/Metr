@@ -19,6 +19,8 @@ struct ConfirmationRow: View {
     let cancel: () -> Void
     let confirm: () -> Void
 
+    @Environment(\.colorSchemeContrast) private var contrast
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
@@ -33,6 +35,8 @@ struct ConfirmationRow: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            // Title and body are read as one element, before the two buttons.
+            .accessibilityElement(children: .combine)
             // The buttons sit on their own row, so a long name never squeezes them (E8 overflow).
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
@@ -47,7 +51,7 @@ struct ConfirmationRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.primary.opacity(0.08))
+                .fill(Color.primary.opacity(RowFill.opacity(contrast)))
         }
         .accessibilityElement(children: .contain)
     }

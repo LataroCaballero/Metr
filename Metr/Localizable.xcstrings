@@ -877,18 +877,6 @@
         }
       }
     },
-    "%@, CPU %@, memory %@": {
-      "comment": "VoiceOver reading of one app row: name, CPU percent, memory size",
-      "extractionState": "manual",
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@, CPU %@, memoria %@"
-          }
-        }
-      }
-    },
     "and %lld more…": {
       "comment": "Plain line under an open app group: how many more helper processes are not listed",
       "extractionState": "manual",
@@ -933,6 +921,120 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$@ · PID %2$lld"
+          }
+        }
+      }
+    },
+    "%@, %@ CPU, %@ memory": {
+      "comment": "VoiceOver reading of one app or helper row: name, CPU percent, memory size, e.g. Google Chrome, 182% CPU, 2.1 GB memory",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, %@ de CPU, %@ de memoria"
+          }
+        }
+      }
+    },
+    "%lld helper processes": {
+      "comment": "VoiceOver part of an app row that has helper processes, e.g. 14 helper processes",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld helper process"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld helper processes"
+                }
+              }
+            }
+          }
+        },
+        "es": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld proceso auxiliar"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld procesos auxiliares"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "collapsed": {
+      "comment": "VoiceOver state of an app row whose helper processes are hidden",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "contraído"
+          }
+        }
+      }
+    },
+    "expanded": {
+      "comment": "VoiceOver state of an app row whose helper processes are listed",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "expandido"
+          }
+        }
+      }
+    },
+    "Expand": {
+      "comment": "VoiceOver custom action name: lists the helper processes of the focused app row",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expandir"
+          }
+        }
+      }
+    },
+    "Collapse": {
+      "comment": "VoiceOver custom action name: hides the helper processes of the focused app row",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Contraer"
+          }
+        }
+      }
+    },
+    "Quit": {
+      "comment": "VoiceOver custom action name: quits the focused app row",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salir"
           }
         }
       }
