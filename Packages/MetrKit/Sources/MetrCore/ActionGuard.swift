@@ -147,3 +147,59 @@ public enum ActionRoutes {
         }
     }
 }
+
+/// Where a row is in its action (D-14, D-15).
+public enum RowActionState: Sendable, Equatable {
+    case rest
+    /// Quit was sent at this monotonic time; the row waits for the process to exit.
+    case quitting(startedAt: Double)
+    /// The process was still alive when the wait ended; the row is back to normal.
+    case didNotQuit
+    /// A Force Quit confirmation is open (02-11).
+    case confirming
+    case forceQuitting(startedAt: Double)
+}
+
+public enum RowActionEvent: Sendable, Equatable {
+    case quitSent(at: Double)
+    case forceQuitRequested
+    case confirmCancelled
+    case forceQuitSent(at: Double)
+    case exited
+    case tick(now: Double)
+    /// The guard refused (stale identity, protected process): nothing happened, the row is as before.
+    case actionRejected
+}
+
+/// The pure state machine of one row's action (D-14, D-15). Times are monotonic seconds supplied
+/// by the caller. An exit always wins: a row whose process left is simply gone on the next reading.
+public enum RowActions {
+    /// Seconds a row waits for the process to exit before it returns to normal (D-15 allows 3 to 5).
+    public static let quitTimeout: Double = 4.0
+
+    public static func reduce(_ state: RowActionState, _ event: RowActionEvent) -> RowActionState {
+        switch (state, event) {
+        case (_, .actionRejected), (_, .exited), (.confirming, .confirmCancelled):
+            return .rest
+        case (.rest, .quitSent(let at)), (.didNotQuit, .quitSent(let at)):
+            return .quitting(startedAt: at)
+        case (.rest, .forceQuitRequested), (.didNotQuit, .forceQuitRequested):
+            return .confirming
+        case (.confirming, .forceQuitSent(let at)):
+            return .forceQuitting(startedAt: at)
+        case (.quitting(let start), .tick(let now)), (.forceQuitting(let start), .tick(let now)):
+            return now - start >= quitTimeout - 1e-9 ? .didNotQuit : state
+        default:
+            return state
+        }
+    }
+
+    /// Whether the list must keep its order while a row is in this state, so the row under the
+    /// pointer cannot move away (D-10).
+    public static func holdsOrder(_ state: RowActionState) -> Bool {
+        switch state {
+        case .quitting, .confirming, .forceQuitting: return true
+        case .rest, .didNotQuit: return false
+        }
+    }
+}

@@ -41,6 +41,8 @@ struct TopAppRowData: Identifiable, Equatable {
     let moreCount: Int
     /// Whether the hover Quit is offered: only `.allowed` shows it, a disabled row shows nothing (PROC-07, D-17).
     let availability: ActionAvailability
+    /// Where the row is in its action: Quitting dims it, Did-not-quit brings it back (D-15).
+    let actionState: RowActionState
 
     var isExpanded: Bool { helperCount > 0 && !helpers.isEmpty }
 }
@@ -104,11 +106,24 @@ final class TopAppsModel {
     @ObservationIgnored private let guardian = ActionGuard.system()
     @ObservationIgnored private let coordinator = QuitCoordinator()
 
+    /// Each row's action state, by row id. Observed: the row views dim and restore from it. A row
+    /// with no entry is at rest.
+    private(set) var actionStates: [String: RowActionState] = [:]
+    /// Rows whose process was seen to exit after Quit: hidden at once, before the next reading.
+    @ObservationIgnored private var exitedIDs: Set<String> = []
+    /// One exit poll per quitting row, only while the row is Quitting or Force-quitting.
+    @ObservationIgnored private var pollTasks: [String: Task<Void, Never>] = [:]
+
+    /// One monotonic clock for all action timing.
+    private static var now: Double { ProcessInfo.processInfo.systemUptime }
+
     private struct MemoKey: Equatable {
         var sequence: UInt64
         var sort: SortColumn
         var frozen: Bool
         var expanded: String?
+        var actions: [String: RowActionState]
+        var exited: Set<String>
     }
 
     init() {}
@@ -134,6 +149,12 @@ final class TopAppsModel {
 
     /// Closes the open group once it is no longer on screen (it exited, or ranks out of the list).
     func collapse(unlessVisible visible: [String]) {
+        // A row that left the screen takes its action state with it.
+        for id in actionStates.keys where !visible.contains(id) {
+            pollTasks[id]?.cancel()
+            pollTasks[id] = nil
+            actionStates[id] = nil
+        }
         if let id = expandedGroupID, !visible.contains(id) {
             expandedGroupID = nil
             previousHelpers = nil
@@ -161,13 +182,18 @@ final class TopAppsModel {
                 return TopAppsDisplay(content: .unavailable, effectiveSort: sort)
             }
             let key = MemoKey(
-                sequence: snapshot.sequence, sort: sort, frozen: isPointerInList, expanded: expandedGroupID)
+                sequence: snapshot.sequence, sort: sort, frozen: isPointerInList, expanded: expandedGroupID,
+                actions: actionStates, exited: exitedIDs)
             if let memo, memo.key == key { return memo.display }
 
             let sortChanged = lastSort != nil && lastSort != sort
-            let frozen = isPointerInList && !sortChanged
+            let holding = actionStates.values.contains(where: RowActions.holdsOrder)
+            let frozen = (isPointerInList || holding) && !sortChanged
             let effective = RankingEngine.effectiveColumn(sort, cpuReady: snapshot.cpuReady)
-            let byID = Dictionary(groups(for: snapshot).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let live = groups(for: snapshot)
+            exitedIDs.formIntersection(live.map(\.id))
+            let byID = Dictionary(
+                live.filter { !exitedIDs.contains($0.id) }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let items = byID.values.map {
                 RankItem(
                     id: $0.id, cpuPercent: $0.cpuPercent, footprintBytes: $0.footprintBytes,
@@ -252,7 +278,8 @@ final class TopAppsModel {
             helperCount: group.helpers.count,
             helpers: helpers,
             moreCount: more,
-            availability: availability)
+            availability: availability,
+            actionState: actionStates[group.id] ?? .rest)
     }
 
     /// The role and availability of a row, from its main member only. An app group with no main
@@ -269,7 +296,52 @@ final class TopAppsModel {
     /// silent no-op; the row simply leaves on the next reading (PROC-05, PROC-07).
     func quit(_ rowID: String) {
         guard let role = roles[rowID], let route = ActionRoutes.route(for: role, op: .quit) else { return }
-        _ = coordinator.execute(route)
+        guard coordinator.execute(route) else {
+            apply(.actionRejected, to: rowID)
+            return
+        }
+        apply(.quitSent(at: Self.now), to: rowID)
+        pollExit(of: rowID, identity: Self.identity(of: role))
+    }
+
+    private static func identity(of role: RowRole) -> ProcessIdentity {
+        switch role {
+        case .app(_, let main, _): return main
+        case .helper(let identity, _), .standalone(let identity, _): return identity
+        }
+    }
+
+    /// Feeds one event to a row's state machine. A row back at rest keeps no entry.
+    private func apply(_ event: RowActionEvent, to rowID: String) {
+        let next = RowActions.reduce(actionStates[rowID] ?? .rest, event)
+        if next == .rest {
+            if actionStates[rowID] != nil { actionStates[rowID] = nil }
+        } else if actionStates[rowID] != next {
+            actionStates[rowID] = next
+        }
+    }
+
+    /// Polls whether the process is still alive every 0.5 s, only while the row is Quitting or
+    /// Force-quitting: an exit hides the row at once, the timeout returns it to normal (D-15).
+    private func pollExit(of rowID: String, identity: ProcessIdentity) {
+        pollTasks[rowID]?.cancel()
+        pollTasks[rowID] = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard let self, !Task.isCancelled else { return }
+                if !self.coordinator.isAlive(identity) {
+                    self.exitedIDs.insert(rowID)
+                    self.apply(.exited, to: rowID)
+                    self.pollTasks[rowID] = nil
+                    return
+                }
+                self.apply(.tick(now: Self.now), to: rowID)
+                if !RowActions.holdsOrder(self.actionStates[rowID] ?? .rest) {
+                    self.pollTasks[rowID] = nil
+                    return
+                }
+            }
+        }
     }
 
     private static func helperID(of sample: ProcessSample) -> String {

@@ -21,7 +21,14 @@ struct AppRow: View {
     @FocusState private var buttonFocused: Bool
 
     /// The hover Quit is offered only for a process the user may quit; never on a disabled row (D-17).
-    private var canQuit: Bool { data.availability == .allowed }
+    private var canQuit: Bool { data.availability == .allowed && !isWorking }
+    /// Quit or Force Quit was sent and the process has not exited yet (D-15).
+    private var isWorking: Bool {
+        switch data.actionState {
+        case .quitting, .forceQuitting: return true
+        case .rest, .didNotQuit, .confirming: return false
+        }
+    }
     private var showsAction: Bool { canQuit && (isHovering || buttonFocused) }
 
     var body: some View {
@@ -33,7 +40,8 @@ struct AppRow: View {
         let quitLabel = String(localized: "Quit \(data.name)")
         let reading = String(localized: "\(data.name), CPU \(cpu), memory \(memory)")
         // A system row adds "System process" for VoiceOver (D-09).
-        let spoken = data.kind == .system ? reading + ", " + String(localized: "System process") : reading
+        let base = data.kind == .system ? reading + ", " + String(localized: "System process") : reading
+        let spoken = isWorking ? data.name + ", " + String(localized: "Quitting…") : base
         HStack(spacing: 0) {
             gutter(label: expandsLabel)
             Color.clear.frame(width: 4)
@@ -45,15 +53,26 @@ struct AppRow: View {
             Color.clear.frame(width: 8)
             nameSlot
             Color.clear.frame(width: 8)
-            number(cpu, active: effectiveSort == .cpu)
-                .minimumScaleFactor(0.85)
-                .frame(width: 44, alignment: .trailing)
-            Color.clear.frame(width: 4)
-            number(memory, active: effectiveSort == .memory)
-                .frame(width: 52, alignment: .trailing)
+            if isWorking {
+                // The number columns give way to one line while the app closes (UI-SPEC "Row states").
+                Text("Quitting…")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.secondary)
+                    .lineLimit(1)
+                    .frame(width: 100, alignment: .trailing)
+            } else {
+                number(cpu, active: effectiveSort == .cpu)
+                    .minimumScaleFactor(0.85)
+                    .frame(width: 44, alignment: .trailing)
+                Color.clear.frame(width: 4)
+                number(memory, active: effectiveSort == .memory)
+                    .frame(width: 52, alignment: .trailing)
+            }
             Color.clear.frame(width: 4)
             actionSlot(label: quitLabel)
         }
+        .opacity(isWorking ? 0.5 : 1)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: isWorking)
         .padding(.horizontal, 8)
         .frame(height: TopAppsSection.rowHeight)
         .background {
@@ -82,7 +101,12 @@ struct AppRow: View {
     /// the system (E7 long-text).
     @ViewBuilder
     private func actionSlot(label: String) -> some View {
-        if canQuit {
+        if isWorking {
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 20)
+                .accessibilityHidden(true)
+        } else if canQuit {
             Button(action: quit) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.body)
