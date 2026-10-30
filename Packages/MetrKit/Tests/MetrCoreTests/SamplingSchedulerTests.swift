@@ -79,6 +79,31 @@ private func median(_ values: [Double]) -> Double {
         #expect(withProcesses >= 3, "events with processes: \(withProcesses)")
     }
 
+    /// RESEARCH Pitfall 5: closing the panel forgets when processes were last read, so reopening
+    /// within the cadence still gets an immediate processes baseline.
+    @Test func reopenWithinASecondDeliversAnImmediateProcessesBaseline() async throws {
+        let (scheduler, rec) = makeScheduler("reopen")
+        try await sleep(150)
+        scheduler.setDemand([.panel])
+        // Close right after a processes delivery, so the last read is only a few ms old.
+        var waited = 0
+        while !rec.events.contains(where: { $0.due.contains(.processes) }) && waited < 500 {
+            try await sleep(5)
+            waited += 5
+        }
+        let before = rec.events.filter { $0.due.contains(.processes) }.count
+        #expect(before >= 1)
+        scheduler.setDemand([])
+        try await sleep(20)
+        rec.clear()
+        scheduler.setDemand([.panel])
+        try await sleep(30)
+        scheduler.stop()
+        #expect(
+            rec.events.first?.due.contains(.processes) == true,
+            "events after the reopen: \(rec.events.map(\.due))")
+    }
+
     @Test func suspendStopsAllTicks() async throws {
         let (scheduler, rec) = makeScheduler("suspend")
         try await sleep(250)

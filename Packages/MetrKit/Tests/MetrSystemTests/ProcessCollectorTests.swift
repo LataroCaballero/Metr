@@ -170,4 +170,94 @@ private func footprint() -> UInt64 {
         #expect(mine2.cpuPercent != nil)
         #expect(second.cpuReady)
     }
+
+    // MARK: Task 2: bounded bookkeeping
+
+    /// A window under the minimum carries the last value and keeps the baseline, so the next
+    /// full window is measured from the first reading.
+    @Test func aShortWindowKeepsThePreviousValueAndTheBaseline() throws {
+        let fake = FakeProcesses()
+        fake.set([fake.entry(10)])
+        fake.setUsage(10, cpuSeconds: 1)
+        let collector = ProcessCollector(sources: fake.sources, minimumCPUWindowNanos: 500_000_000)
+        _ = collector.sample()
+        fake.advance(seconds: 2)
+        fake.setUsage(10, cpuSeconds: 2)
+        let measured = try #require(collector.sample().value?.processes[0].cpuPercent)
+        #expect(abs(measured - 50) < 0.001)
+
+        fake.advance(seconds: 0.1)  // under the 0.5 s floor
+        fake.setUsage(10, cpuSeconds: 2.09)
+        let carried = try #require(collector.sample().value?.processes[0].cpuPercent)
+        #expect(abs(carried - 50) < 0.001, "a short window must carry the previous value, got \(carried)")
+
+        fake.advance(seconds: 1.9)  // 2.0 s since the kept baseline, +1.0 s of CPU in total
+        fake.setUsage(10, cpuSeconds: 3.0)
+        let next = try #require(collector.sample().value?.processes[0].cpuPercent)
+        #expect(abs(next - 50) < 0.001, "the baseline must not advance on a short window, got \(next)")
+    }
+
+    @Test func pathIsResolvedOncePerIdentity() throws {
+        let fake = FakeProcesses()
+        fake.set([fake.entry(10), fake.entry(11)])
+        fake.setUsage(10, cpuSeconds: 1)
+        fake.setUsage(11, cpuSeconds: 1)
+        let collector = ProcessCollector(sources: fake.sources)
+        for _ in 0..<4 {
+            fake.advance(seconds: 2)
+            _ = collector.sample()
+        }
+        #expect(fake.pathCalls == 2)
+    }
+
+    @Test func vanishedIdentitiesArePrunedFromBaselinesAndThePathCache() throws {
+        let fake = FakeProcesses()
+        fake.set([fake.entry(10), fake.entry(11)])
+        fake.setUsage(10, cpuSeconds: 1)
+        fake.setUsage(11, cpuSeconds: 1)
+        let collector = ProcessCollector(sources: fake.sources)
+        _ = collector.sample()
+        #expect(collector.trackedIdentityCount == 2)
+        fake.advance(seconds: 2)
+        fake.set([fake.entry(10)])
+        _ = collector.sample()
+        #expect(collector.trackedIdentityCount == 1)
+
+        // 11 comes back as the same identity: its path is resolved again and its CPU restarts.
+        fake.advance(seconds: 2)
+        fake.set([fake.entry(10), fake.entry(11)])
+        let calls = fake.pathCalls
+        let snapshot = try #require(collector.sample().value)
+        #expect(fake.pathCalls == calls + 1)
+        #expect(snapshot.processes.first { $0.identity.pid == 11 }?.cpuPercent == nil)
+    }
+
+    @Test func resetClearsTheBaselinesAndThePathCache() throws {
+        let fake = FakeProcesses()
+        fake.set([fake.entry(10)])
+        fake.setUsage(10, cpuSeconds: 1)
+        let collector = ProcessCollector(sources: fake.sources)
+        _ = collector.sample()
+        #expect(collector.trackedIdentityCount == 1)
+        collector.reset()
+        #expect(collector.trackedIdentityCount == 0)
+        fake.advance(seconds: 2)
+        _ = collector.sample()
+        #expect(fake.pathCalls == 2)
+    }
+
+    /// T-02-09: 1,000 live samples must not grow Metr's memory. The footprint is process-wide and
+    /// other suites run in parallel, so the threshold matches CPUCollectorTests: 32 MiB.
+    @Test func thousandSamplesDoNotGrowFootprint() throws {
+        let collector = ProcessCollector()
+        _ = collector.sample()  // warm up
+        let before = footprint()
+        #expect(before > 0)
+        for _ in 0..<1_000 {
+            _ = collector.sample()
+        }
+        let after = footprint()
+        let growth = after > before ? after - before : 0
+        #expect(growth < 33_554_432, "footprint grew by \(growth) bytes")
+    }
 }

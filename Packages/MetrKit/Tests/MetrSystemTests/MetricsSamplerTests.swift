@@ -58,4 +58,33 @@ private func isPending<V>(_ reading: Reading<V>) -> Bool {
         #expect(isPending(first), "the baseline tick after a real resume must be pending")
         #expect(cpuAfter.dropFirst().contains { $0.value != nil }, "no priming value after the baseline")
     }
+
+    /// D-20: closing the last consumer returns the store's processes to pending and stops reading.
+    @Test func cancellingTheLastDemandEmitsPendingProcesses() async throws {
+        let sampler = MetricsSampler(cadenceScale: 0.05)
+        let recorder = BatchRecorder()
+        sampler.start(onBatch: { recorder.add($0) })
+        sampler.register(.panel)
+        try await sleep(300)
+        #expect(
+            recorder.batches.contains { $0.processes?.value != nil },
+            "no processes value arrived while the panel was open")
+
+        sampler.cancel(.panel)
+        try await sleep(100)
+        let settled = recorder.batches.count
+        try await sleep(250)
+        sampler.stop()
+
+        let batches = recorder.batches
+        let pendingIndex = try #require(
+            batches.firstIndex { $0.processes.map(isPending) == true },
+            "no processes .pending batch after the last cancel")
+        #expect(
+            !batches.dropFirst(pendingIndex + 1).contains { $0.processes?.value != nil },
+            "a processes value arrived after the pending batch")
+        #expect(
+            !batches.dropFirst(settled).contains { $0.processes != nil },
+            "processes were still being emitted after the panel closed")
+    }
 }
