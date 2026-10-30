@@ -99,4 +99,90 @@ import Testing
         #expect((0...1).contains(reading.system))
         #expect(abs(reading.user + reading.system - reading.total) < 1e-9)
     }
+
+    // CPU-02 / D-02: clusters come from the system's perflevels, never from hard-coded P/E.
+    @Test func clusterRangesTwoLevelsEfficiencyFirst() throws {
+        let layout = CoreLayout(levels: [
+            CoreLevel(name: "Performance", logicalCPUs: 4),
+            CoreLevel(name: "Efficiency", logicalCPUs: 6),
+        ])
+        let ranges = try #require(layout.clusterRanges(coreCount: 10))
+        #expect(ranges.map(\.name) == ["Performance", "Efficiency"])
+        #expect(ranges.map(\.cores) == [6..<10, 0..<6])
+    }
+
+    @Test func clusterRangesOneAndThreeLevels() throws {
+        let one = CoreLayout(levels: [CoreLevel(name: "Only", logicalCPUs: 8)])
+        let oneRanges = try #require(one.clusterRanges(coreCount: 8))
+        #expect(oneRanges.map(\.name) == ["Only"])
+        #expect(oneRanges.map(\.cores) == [0..<8])
+
+        let three = CoreLayout(levels: [
+            CoreLevel(name: "Super", logicalCPUs: 2),
+            CoreLevel(name: "Performance", logicalCPUs: 4),
+            CoreLevel(name: "Efficiency", logicalCPUs: 4),
+        ])
+        let threeRanges = try #require(three.clusterRanges(coreCount: 10))
+        #expect(threeRanges.map(\.name) == ["Super", "Performance", "Efficiency"])
+        #expect(threeRanges.map(\.cores) == [8..<10, 4..<8, 0..<4])
+    }
+
+    @Test func clusterRangesRejectMismatch() {
+        let two = CoreLayout(levels: [
+            CoreLevel(name: "Performance", logicalCPUs: 4),
+            CoreLevel(name: "Efficiency", logicalCPUs: 6),
+        ])
+        #expect(two.clusterRanges(coreCount: 12) == nil)
+        #expect(two.clusterRanges(coreCount: 8) == nil)
+        #expect(CoreLayout(levels: []).clusterRanges(coreCount: 10) == nil)
+        let zero = CoreLayout(levels: [
+            CoreLevel(name: "Performance", logicalCPUs: 0),
+            CoreLevel(name: "Efficiency", logicalCPUs: 10),
+        ])
+        #expect(zero.clusterRanges(coreCount: 10) == nil)
+    }
+
+    @Test func clusterUsageFollowsLayout() throws {
+        let zero = CPUTicks(user: 0, system: 0, idle: 0, nice: 0)
+        let previous = Array(repeating: zero, count: 10)
+        // cores 0-5: 10 % busy ; cores 6-9: 80 % busy
+        var current: [CPUTicks] = []
+        for i in 0..<10 {
+            current.append(
+                i < 6
+                    ? CPUTicks(user: 10, system: 0, idle: 90, nice: 0)
+                    : CPUTicks(user: 60, system: 20, idle: 20, nice: 0))
+        }
+        let layout = CoreLayout(levels: [
+            CoreLevel(name: "Performance", logicalCPUs: 4),
+            CoreLevel(name: "Efficiency", logicalCPUs: 6),
+        ])
+        let withLayout = try #require(CPUMath.usage(previous: previous, current: current, layout: layout))
+        #expect(withLayout.clusters.map(\.name) == ["Performance", "Efficiency"])
+        #expect(abs(withLayout.clusters[0].usage - 0.80) < 1e-9)
+        #expect(abs(withLayout.clusters[1].usage - 0.10) < 1e-9)
+
+        let plain = try #require(CPUMath.usage(previous: previous, current: current))
+        let mismatched = CoreLayout(levels: [CoreLevel(name: "Performance", logicalCPUs: 4)])
+        let bad = try #require(CPUMath.usage(previous: previous, current: current, layout: mismatched))
+        #expect(plain.clusters.isEmpty)
+        #expect(bad.clusters.isEmpty)
+        #expect(bad.total == plain.total && bad.user == plain.user && bad.system == plain.system)
+        #expect(withLayout.total == plain.total)
+    }
+
+    @Test func clusterWithZeroDeltaYieldsNoClusters() throws {
+        // Cores 0-1 did not advance at all; cores 2-3 did. A cluster with no delta cannot be averaged.
+        let previous = Array(repeating: CPUTicks(user: 5, system: 5, idle: 5, nice: 5), count: 4)
+        var current = previous
+        current[2] = CPUTicks(user: 15, system: 5, idle: 15, nice: 5)
+        current[3] = CPUTicks(user: 15, system: 5, idle: 15, nice: 5)
+        let layout = CoreLayout(levels: [
+            CoreLevel(name: "Performance", logicalCPUs: 2),
+            CoreLevel(name: "Efficiency", logicalCPUs: 2),
+        ])
+        let reading = try #require(CPUMath.usage(previous: previous, current: current, layout: layout))
+        #expect(reading.clusters.isEmpty)
+        #expect(reading.total > 0)
+    }
 }

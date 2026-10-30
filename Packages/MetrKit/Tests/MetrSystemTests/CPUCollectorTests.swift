@@ -49,4 +49,28 @@ private func footprint() -> UInt64 {
         let growth = after > before ? after - before : 0
         #expect(growth < 33_554_432, "footprint grew by \(growth) bytes")
     }
+
+    private func sysctlInt(_ name: String) -> Int {
+        var value: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        guard sysctlbyname(name, &value, &size, nil, 0) == 0 else { return -1 }
+        return Int(value)
+    }
+
+    /// CPU-02: the layout comes from hw.perflevelN, and its counts add up to the real core count.
+    @Test func layoutMatchesThisMac() throws {
+        let layout = try #require(CPUCollector.readLayout())
+        #expect(layout.levels.count == sysctlInt("hw.nperflevels"))
+        #expect(layout.levels.allSatisfy { !$0.name.isEmpty })
+        #expect(layout.levels.map(\.logicalCPUs).reduce(0, +) == sysctlInt("hw.logicalcpu"))
+    }
+
+    @Test func secondSampleCarriesOneClusterPerLevel() async throws {
+        let layout = try #require(CPUCollector.readLayout())
+        let collector = CPUCollector()
+        _ = collector.sample()
+        try await Task.sleep(for: .milliseconds(200))
+        let reading = try #require(collector.sample().value)
+        #expect(reading.clusters.count == layout.levels.count)
+    }
 }
