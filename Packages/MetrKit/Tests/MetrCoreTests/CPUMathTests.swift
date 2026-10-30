@@ -67,4 +67,36 @@ import Testing
         let reading = try #require(CPUMath.usage(previous: previous, current: current))
         #expect(abs(reading.total - 0.5) < 1e-9)
     }
+
+    // PANEL-01: user = user + nice ticks, system = system ticks, same all-core denominator as total.
+    @Test func userAndSystemSplitCountsNiceAsUser() throws {
+        let previous = [
+            CPUTicks(user: 0, system: 0, idle: 0, nice: 0),
+            CPUTicks(user: 0, system: 0, idle: 0, nice: 0),
+        ]
+        // each core: +20 user, +5 nice, +15 system, +60 idle
+        let current = [
+            CPUTicks(user: 20, system: 15, idle: 60, nice: 5),
+            CPUTicks(user: 20, system: 15, idle: 60, nice: 5),
+        ]
+        let reading = try #require(CPUMath.usage(previous: previous, current: current))
+        #expect(abs(reading.total - 0.40) < 1e-9)
+        #expect(abs(reading.user - 0.25) < 1e-9)
+        #expect(abs(reading.system - 0.15) < 1e-9)
+    }
+
+    @Test func userAndSystemClampToUnitRange() throws {
+        let previous = [
+            CPUTicks(user: UInt32.max - 4, system: 3, idle: 9, nice: 0),
+            CPUTicks(user: 10, system: 10, idle: 10, nice: 10),
+        ]
+        let current = [
+            CPUTicks(user: 30, system: 70, idle: 9, nice: 0),
+            CPUTicks(user: 40, system: 10, idle: 110, nice: 20),
+        ]
+        let reading = try #require(CPUMath.usage(previous: previous, current: current))
+        #expect((0...1).contains(reading.user))
+        #expect((0...1).contains(reading.system))
+        #expect(abs(reading.user + reading.system - reading.total) < 1e-9)
+    }
 }
