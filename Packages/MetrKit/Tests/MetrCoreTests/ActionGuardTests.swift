@@ -131,4 +131,30 @@ struct ActionGuardTests {
         #expect(ActionRoutes.route(for: standalone, op: .quit) == .signal(ActionRoutes.sigterm, solo, "/usr/bin/yes"))
         #expect(ActionRoutes.route(for: standalone, op: .forceQuit) == .signal(ActionRoutes.sigkill, solo, "/usr/bin/yes"))
     }
+
+    @Test("a row goes quitting, then back to rest or to did-not-quit")
+    func rowStateMachine() {
+        typealias S = RowActionState
+        #expect(RowActions.quitTimeout == 4.0)
+        #expect(RowActions.reduce(.rest, .quitSent(at: 0)) == .quitting(startedAt: 0))
+        #expect(RowActions.reduce(.quitting(startedAt: 0), .tick(now: 3.9)) == .quitting(startedAt: 0))
+        #expect(RowActions.reduce(.quitting(startedAt: 0), .tick(now: 4.0)) == .didNotQuit)
+        #expect(RowActions.reduce(.quitting(startedAt: 0), .exited) == .rest)
+
+        #expect(RowActions.reduce(.rest, .forceQuitRequested) == .confirming)
+        #expect(RowActions.reduce(.didNotQuit, .forceQuitRequested) == .confirming)
+        #expect(RowActions.reduce(.confirming, .confirmCancelled) == .rest)
+        #expect(RowActions.reduce(.confirming, .forceQuitSent(at: 10)) == .forceQuitting(startedAt: 10))
+        #expect(RowActions.reduce(.forceQuitting(startedAt: 10), .tick(now: 14)) == .didNotQuit)
+        #expect(RowActions.reduce(.forceQuitting(startedAt: 10), .tick(now: 13)) == .forceQuitting(startedAt: 10))
+
+        let all: [S] = [.rest, .quitting(startedAt: 0), .didNotQuit, .confirming, .forceQuitting(startedAt: 0)]
+        for state in all { #expect(RowActions.reduce(state, .actionRejected) == .rest) }
+
+        #expect(RowActions.holdsOrder(.rest) == false)
+        #expect(RowActions.holdsOrder(.didNotQuit) == false)
+        #expect(RowActions.holdsOrder(.quitting(startedAt: 0)))
+        #expect(RowActions.holdsOrder(.confirming))
+        #expect(RowActions.holdsOrder(.forceQuitting(startedAt: 0)))
+    }
 }
