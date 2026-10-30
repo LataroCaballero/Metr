@@ -48,4 +48,25 @@ import Testing
         // .file is decimal: 210e9 bytes reads as 210 GB, not 195.6 GB.
         #expect(MetricText(locale: en).diskBytes(bytes).contains("210"))
     }
+
+    @Test func processCPUIsPercentOfOneCoreInBothLocales() {
+        for locale in [en, es] {
+            let text = MetricText(locale: locale)
+            #expect(text.processCPU(182) == text.percent(1.82))
+            #expect(text.processCPU(41.4) == text.percent(0.414))
+            #expect(text.processCPU(0.4) == "<" + text.percent(0.01))
+            #expect(text.processCPU(0) == text.percent(0))
+            #expect(text.processCPU(nil) == "\u{2014}")
+        }
+        #expect(MetricText(locale: en).processCPU(182) == "182%")
+        #expect(MetricText(locale: es).processCPU(182).contains("182"))
+    }
+
+    @Test func processMemoryIsTheMemoryByteStyleOrAnEmDash() {
+        for locale in [en, es] {
+            let text = MetricText(locale: locale)
+            #expect(text.processMemory(nil) == "\u{2014}")
+            #expect(text.processMemory(402_653_184) == text.memoryBytes(402_653_184))
+        }
+    }
 }
