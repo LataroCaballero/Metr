@@ -49,12 +49,34 @@ private func median(_ values: [Double]) -> Double {
         scheduler.stop()
         let events = rec.events
         #expect(events.count >= 2)
-        #expect(events[0].due == Set(Metric.allCases))
+        #expect(events[0].due == [.cpu, .memory, .disk])
         #expect(!events[0].priming)
         #expect(events[1].due == [.cpu])
         #expect(events[1].priming)
         #expect(events[1].elapsed < 0.1, "priming elapsed \(events[1].elapsed)")
         #expect(rec.plans.first?.tier == .idle)
+    }
+
+    /// D-20 / RESEARCH Pitfall 4: the idle start and wake baselines never sample processes.
+    @Test func idleStartNeverDeliversProcesses() async throws {
+        let (scheduler, rec) = makeScheduler("idle-no-processes")
+        try await sleep(300)
+        scheduler.stop()
+        #expect(rec.events.count >= 2)
+        #expect(!rec.events.contains { $0.due.contains(.processes) })
+    }
+
+    @Test func panelDemandDeliversProcessesAtOnceThenOnCadence() async throws {
+        let (scheduler, rec) = makeScheduler("panel-processes")
+        try await sleep(150)
+        rec.clear()
+        scheduler.setDemand([.panel])
+        try await sleep(30)
+        #expect(rec.events.first?.due.contains(.processes) == true)
+        try await sleep(370)
+        scheduler.stop()
+        let withProcesses = rec.events.filter { $0.due.contains(.processes) }.count
+        #expect(withProcesses >= 3, "events with processes: \(withProcesses)")
     }
 
     @Test func suspendStopsAllTicks() async throws {
@@ -98,7 +120,7 @@ private func median(_ values: [Double]) -> Double {
         scheduler.stop()
         let after = Array(rec.events.dropFirst(before))
         #expect(after.count >= 2)
-        #expect(after[0].due == Set(Metric.allCases))
+        #expect(after[0].due == [.cpu, .memory, .disk])
         #expect(!after[0].priming)
         #expect(after[1].due == [.cpu])
         #expect(after[1].priming)
@@ -180,6 +202,6 @@ private func median(_ values: [Double]) -> Double {
         try await sleep(150)
         scheduler.stop()
         #expect(baselines.withLock { $0 } == 2)
-        #expect(rec.events.first?.due == Set(Metric.allCases))
+        #expect(rec.events.first?.due == [.cpu, .memory, .disk])
     }
 }

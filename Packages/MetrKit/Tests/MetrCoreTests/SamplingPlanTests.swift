@@ -15,14 +15,25 @@ import Testing
         let plan = SamplingPlan.make(demand: [.panel], suspended: false, constrained: false)
         #expect(plan.tier == .panel)
         #expect(plan.baseInterval == 1)
-        #expect(plan.cadence == [.cpu: 1, .memory: 1, .disk: 10])
+        #expect(plan.cadence == [.cpu: 1, .memory: 1, .disk: 10, .processes: 2])
     }
 
     @Test func windowTableIsExact() {
         let plan = SamplingPlan.make(demand: [.window], suspended: false, constrained: false)
         #expect(plan.tier == .window)
         #expect(plan.baseInterval == 1)
-        #expect(plan.cadence == [.cpu: 1, .memory: 1, .disk: 10])
+        #expect(plan.cadence == [.cpu: 1, .memory: 1, .disk: 10, .processes: 2])
+    }
+
+    @Test func processesOnlyInPanelAndWindowTiers() {
+        let idle = SamplingPlan.make(demand: [], suspended: false, constrained: false)
+        let idleConstrained = SamplingPlan.make(demand: [], suspended: false, constrained: true)
+        let suspended = SamplingPlan.make(demand: [.panel], suspended: true, constrained: false)
+        #expect(idle.cadence[.processes] == nil)
+        #expect(idleConstrained.cadence[.processes] == nil)
+        #expect(suspended.cadence[.processes] == nil)
+        #expect(SamplingPlan.make(demand: [.panel], suspended: false, constrained: false).cadence[.processes] == 2)
+        #expect(SamplingPlan.make(demand: [.window], suspended: false, constrained: false).cadence[.processes] == 2)
     }
 
     @Test func windowWinsOverPanel() {
@@ -45,7 +56,7 @@ import Testing
         #expect(plan.constrained)
         let panel = SamplingPlan.make(demand: [.panel], suspended: false, constrained: true)
         #expect(panel.baseInterval == 2)
-        #expect(panel.cadence == [.cpu: 2, .memory: 2, .disk: 20])
+        #expect(panel.cadence == [.cpu: 2, .memory: 2, .disk: 20, .processes: 4])
     }
 
     @Test func cadenceScaleClampsAtBothEnds() {
