@@ -13,15 +13,22 @@ private final class FakeProcesses: Sendable {
         var usage: [Int32: ProcessUsage] = [:]
         var now: UInt64 = 10_000_000_000
         var pathCalls = 0
+        var pathOverride: [Int32: String] = [:]
+        var pathAsked: Set<Int32> = []
     }
     let state = Mutex(State())
 
     static let uid: UInt32 = 501
 
-    func entry(_ pid: Int32, start: Int64 = 1_000, uid: UInt32 = FakeProcesses.uid) -> ProcessEntry {
+    func entry(
+        _ pid: Int32, start: Int64 = 1_000, uid: UInt32 = FakeProcesses.uid, ppid: Int32 = 1
+    ) -> ProcessEntry {
         ProcessEntry(
-            identity: ProcessIdentity(pid: pid, startMicros: start), ppid: 1, uid: uid, command: "cmd\(pid)")
+            identity: ProcessIdentity(pid: pid, startMicros: start), ppid: ppid, uid: uid, command: "cmd\(pid)")
     }
+
+    func setPath(_ pid: Int32, _ path: String) { state.withLock { $0.pathOverride[pid] = path } }
+    func askedPath(for pid: Int32) -> Bool { state.withLock { $0.pathAsked.contains(pid) } }
 
     func set(_ entries: [ProcessEntry]?) { state.withLock { $0.entries = entries } }
     func setUsage(_ pid: Int32, cpuSeconds: Double, footprint: UInt64 = 50_000_000) {
@@ -40,7 +47,8 @@ private final class FakeProcesses: Sendable {
             path: { [self] pid in
                 state.withLock {
                     $0.pathCalls += 1
-                    return "/Applications/App\(pid).app/Contents/MacOS/App\(pid)"
+                    $0.pathAsked.insert(pid)
+                    return $0.pathOverride[pid] ?? "/Applications/App\(pid).app/Contents/MacOS/App\(pid)"
                 }
             },
             now: { [self] in state.withLock { $0.now } })
@@ -259,5 +267,182 @@ private func footprint() -> UInt64 {
         let after = footprint()
         let growth = after > before ? after - before : 0
         #expect(growth < 33_554_432, "footprint grew by \(growth) bytes")
+    }
+}
+
+/// A scripted top source: the test sets the state and the latest block, and counts start and stop.
+private final class FakeTop: TopSnapshotSource, Sendable {
+    struct State: Sendable {
+        var block: TopBlock?
+        var state: TopStreamState = .stopped
+        var starts = 0
+        var stops = 0
+    }
+    let box = Mutex(State())
+
+    func start() { box.withLock { $0.starts += 1; $0.state = .starting } }
+    func stop() { box.withLock { $0.stops += 1; $0.state = .stopped; $0.block = nil } }
+    func latest() -> TopBlock? { box.withLock { $0.block } }
+    var state: TopStreamState { box.withLock { $0.state } }
+
+    func set(state: TopStreamState, block: TopBlock?) { box.withLock { $0.state = state; $0.block = block } }
+    var starts: Int { box.withLock { $0.starts } }
+    var stops: Int { box.withLock { $0.stops } }
+
+    static func block(
+        sequence: Int, notBefore: Int64 = 1_000_000, rows: [TopRow]
+    ) -> TopBlock {
+        TopBlock(
+            sequence: sequence, rows: Dictionary(uniqueKeysWithValues: rows.map { ($0.pid, $0) }),
+            notBeforeMicros: notBefore)
+    }
+}
+
+@Suite struct ProcessCollectorTopMergeTests {
+    private func fixture() -> (FakeProcesses, FakeTop) {
+        let fake = FakeProcesses()
+        let top = FakeTop()
+        return (fake, top)
+    }
+
+    @Test func otherUidEntriesTakeFootprintFromTheBlockAndCPUOnlyWhenValid() throws {
+        let (fake, top) = fixture()
+        fake.set([
+            fake.entry(10), fake.entry(900, uid: 0), fake.entry(901, uid: 88), fake.entry(902, uid: 0),
+        ])
+        fake.setUsage(10, cpuSeconds: 1)
+        let rows = [
+            TopRow(pid: 900, cpuPercent: 12.5, footprintBytes: 600_000_000),
+            TopRow(pid: 901, cpuPercent: 3.0, footprintBytes: 70_000_000),
+            TopRow(pid: 5555, cpuPercent: 99, footprintBytes: 1),  // in the block but not in listAll
+        ]
+        let collector = ProcessCollector(sources: fake.sources, top: top)
+
+        top.set(state: .running, block: FakeTop.block(sequence: 1, rows: rows))
+        let first = try #require(collector.sample().value)
+        #expect(Set(first.processes.map(\.identity.pid)) == [10, 900, 901], "902 is missing from the block")
+        let ws = try #require(first.processes.first { $0.identity.pid == 900 })
+        #expect(ws.footprintBytes == 600_000_000)
+        #expect(ws.cpuPercent == nil, "block 1 has no CPU baseline: pending, never a fabricated 0")
+        #expect(ws.uid == 0)
+
+        top.set(state: .running, block: FakeTop.block(sequence: 2, rows: rows))
+        let second = try #require(collector.sample().value)
+        #expect(second.processes.first { $0.identity.pid == 900 }?.cpuPercent == 12.5)
+        #expect(second.processes.first { $0.identity.pid == 901 }?.footprintBytes == 70_000_000)
+    }
+
+    /// T-02-15: a pid reused by a process that started after the block's window began never
+    /// borrows the old process's numbers.
+    @Test func reusedPidAfterTheBlockIsOmitted() throws {
+        let (fake, top) = fixture()
+        let rows = [TopRow(pid: 900, cpuPercent: 40, footprintBytes: 500_000_000)]
+        top.set(state: .running, block: FakeTop.block(sequence: 2, notBefore: 1_000_000, rows: rows))
+        let collector = ProcessCollector(sources: fake.sources, top: top)
+
+        fake.set([fake.entry(900, start: 999_000, uid: 0)])
+        let before = try #require(collector.sample().value)
+        #expect(before.processes.map(\.identity.pid) == [900])
+
+        fake.set([fake.entry(900, start: 1_200_000, uid: 0)])
+        let after = try #require(collector.sample().value)
+        #expect(after.processes.isEmpty, "a process that started after the block began must wait")
+    }
+
+    @Test func metrsOwnTopChildIsExcluded() throws {
+        let (fake, top) = fixture()
+        // selfPID is 999 in the fake sources.
+        fake.set([
+            fake.entry(800, uid: 0, ppid: 999),  // our top child
+            fake.entry(801, uid: 501, ppid: 999),  // some other child of ours
+            fake.entry(802, uid: 0, ppid: 1),  // a top that is not ours
+        ])
+        fake.setUsage(801, cpuSeconds: 1)
+        fake.setPath(800, "/usr/bin/top")
+        fake.setPath(802, "/usr/bin/top")
+        let rows = [
+            TopRow(pid: 800, cpuPercent: 5, footprintBytes: 9_000_000),
+            TopRow(pid: 802, cpuPercent: 5, footprintBytes: 9_000_000),
+        ]
+        top.set(state: .running, block: FakeTop.block(sequence: 2, rows: rows))
+        let snapshot = try #require(ProcessCollector(sources: fake.sources, top: top).sample().value)
+        #expect(Set(snapshot.processes.map(\.identity.pid)) == [801, 802])
+    }
+
+    @Test func pathsAreResolvedForOtherUidIdentitiesToo() throws {
+        let (fake, top) = fixture()
+        fake.set([fake.entry(10), fake.entry(900, uid: 0)])
+        fake.setUsage(10, cpuSeconds: 1)
+        top.set(state: .running, block: FakeTop.block(sequence: 2, rows: [TopRow(pid: 900, cpuPercent: 1, footprintBytes: 5)]))
+        let snapshot = try #require(ProcessCollector(sources: fake.sources, top: top).sample().value)
+        #expect(fake.askedPath(for: 900))
+        #expect(snapshot.processes.first { $0.identity.pid == 900 }?.path == "/Applications/App900.app/Contents/MacOS/App900")
+    }
+
+    @Test func otherUsersStateFollowsTheSource() throws {
+        let fake = FakeProcesses()
+        fake.set([fake.entry(10), fake.entry(900, uid: 0)])
+        fake.setUsage(10, cpuSeconds: 1)
+        let rows = [TopRow(pid: 900, cpuPercent: 1, footprintBytes: 5)]
+
+        let none = try #require(ProcessCollector(sources: fake.sources).sample().value)
+        #expect(none.otherUsers == .unavailable)
+        #expect(none.processes.map(\.identity.pid) == [10])
+
+        let top = FakeTop()
+        let collector = ProcessCollector(sources: fake.sources, top: top)
+        top.set(state: .starting, block: nil)
+        #expect(try #require(collector.sample().value).otherUsers == .pending)
+        top.set(state: .running, block: nil)
+        #expect(try #require(collector.sample().value).otherUsers == .pending)
+        top.set(state: .running, block: FakeTop.block(sequence: 1, rows: rows))
+        #expect(try #require(collector.sample().value).otherUsers == .available)
+        top.set(state: .failed, block: nil)
+        let failed = try #require(collector.sample().value)
+        #expect(failed.otherUsers == .unavailable)
+        #expect(failed.processes.map(\.identity.pid) == [10], "own rows keep ranking")
+    }
+
+    @Test func cpuReadyNeedsTheTopBlocksCPUUnlessUnavailable() throws {
+        let (fake, top) = fixture()
+        fake.set([fake.entry(10), fake.entry(900, uid: 0)])
+        fake.setUsage(10, cpuSeconds: 1)
+        let rows = [TopRow(pid: 900, cpuPercent: 1, footprintBytes: 5)]
+        let collector = ProcessCollector(sources: fake.sources, top: top)
+
+        top.set(state: .running, block: FakeTop.block(sequence: 1, rows: rows))
+        _ = collector.sample()
+        fake.advance(seconds: 2)
+        fake.setUsage(10, cpuSeconds: 2)
+        #expect(try #require(collector.sample().value).cpuReady == false, "block 1 has no CPU yet")
+
+        top.set(state: .running, block: FakeTop.block(sequence: 2, rows: rows))
+        fake.advance(seconds: 2)
+        fake.setUsage(10, cpuSeconds: 3)
+        #expect(try #require(collector.sample().value).cpuReady == true)
+
+        // With top failed the list is the user's own processes and their CPU is enough.
+        let (fake2, top2) = fixture()
+        fake2.set([fake2.entry(10)])
+        fake2.setUsage(10, cpuSeconds: 1)
+        let collector2 = ProcessCollector(sources: fake2.sources, top: top2)
+        top2.set(state: .failed, block: nil)
+        _ = collector2.sample()
+        fake2.advance(seconds: 2)
+        fake2.setUsage(10, cpuSeconds: 2)
+        #expect(try #require(collector2.sample().value).cpuReady == true)
+    }
+
+    @Test func aStoppedSourceIsStartedBySampleAndResetStopsIt() throws {
+        let (fake, top) = fixture()
+        fake.set([fake.entry(10)])
+        fake.setUsage(10, cpuSeconds: 1)
+        let collector = ProcessCollector(sources: fake.sources, top: top)
+        _ = collector.sample()
+        #expect(top.starts == 1)
+        _ = collector.sample()
+        #expect(top.starts == 1, "a starting source must not be started again")
+        collector.reset()
+        #expect(top.stops == 1)
     }
 }

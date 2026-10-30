@@ -149,7 +149,10 @@ public final class ProcessCollector {
 
     /// A CPU window shorter than `minimumCPUWindowNanos` is noise: the identity keeps its last
     /// value and its baseline, so the next full window is measured from the older reading.
-    public init(sources: ProcessSources = .live, minimumCPUWindowNanos: UInt64 = 500_000_000) {
+    public init(
+        sources: ProcessSources = .live, top: (any TopSnapshotSource)? = nil,
+        minimumCPUWindowNanos: UInt64 = 500_000_000
+    ) {
         self.sources = sources
         self.minimumCPUWindowNanos = minimumCPUWindowNanos
     }

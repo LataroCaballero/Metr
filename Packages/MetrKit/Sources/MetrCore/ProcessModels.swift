@@ -67,6 +67,11 @@ public struct ProcessSample: Sendable, Equatable {
     }
 }
 
+/// Whether the other-users half of the process list could be read.
+public enum OtherUsersState: String, Sendable, Equatable {
+    case pending, available, unavailable
+}
+
 /// Everything one process pass saw.
 public struct ProcessSnapshot: Sendable, Equatable {
     /// Increases by one per delivered snapshot; lets a consumer tell a new reading from a re-render.
@@ -74,11 +79,16 @@ public struct ProcessSnapshot: Sendable, Equatable {
     public var processes: [ProcessSample]
     /// True once CPU is known for at least one process (the second reading after an open, D-20).
     public var cpuReady: Bool
+    /// Whether system and other-user processes are in `processes` (RED skeleton).
+    public var otherUsers: OtherUsersState
 
-    public init(sequence: UInt64, processes: [ProcessSample], cpuReady: Bool) {
+    public init(
+        sequence: UInt64, processes: [ProcessSample], cpuReady: Bool, otherUsers: OtherUsersState = .pending
+    ) {
         self.sequence = sequence
         self.processes = processes
         self.cpuReady = cpuReady
+        self.otherUsers = otherUsers
     }
 }
 
