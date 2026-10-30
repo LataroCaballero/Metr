@@ -684,6 +684,54 @@
           }
         }
       }
+    },
+    "and %lld more…": {
+      "comment": "Plain line under an open app group: how many more helper processes are not listed",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "y %lld más…"
+          }
+        }
+      }
+    },
+    "Expand %@": {
+      "comment": "VoiceOver label of the disclosure chevron of a closed app row, e.g. Expand Google Chrome",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expandir %@"
+          }
+        }
+      }
+    },
+    "Collapse %@": {
+      "comment": "VoiceOver label of the disclosure chevron of an open app row, e.g. Collapse Google Chrome",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Contraer %@"
+          }
+        }
+      }
+    },
+    "%@ · PID %lld": {
+      "comment": "Tooltip of a helper row: cleaned name, then the process id",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · PID %2$lld"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
