@@ -194,6 +194,40 @@ private func median(_ values: [Double]) -> Double {
         #expect(rec.plans.last?.tier == .panel)
     }
 
+    /// T-02-22: an event-driven early sample only ever carries metrics the current plan already
+    /// samples, so it can never add process work to the idle state.
+    @Test func deliverNowOnlyForMetricsInThePlan() async throws {
+        let (scheduler, rec) = makeScheduler("deliver-now")
+        try await sleep(150)
+
+        // Idle plan: processes are not in the plan, so nothing is delivered for them.
+        rec.clear()
+        scheduler.deliverNow([.processes])
+        try await sleep(50)
+        #expect(
+            !rec.events.contains { $0.due.contains(.processes) },
+            "an idle deliverNow added process work: \(rec.events.map(\.due))")
+
+        // Panel plan: exactly the requested metric, as its own event.
+        scheduler.setDemand([.panel])
+        try await sleep(30)
+        rec.clear()
+        scheduler.deliverNow([.processes])
+        try await sleep(20)
+        #expect(
+            rec.events.contains { $0.due == [.processes] },
+            "no deliverNow event in the panel plan: \(rec.events.map(\.due))")
+
+        // Suspended: nothing, even for a metric that was in the plan a moment ago.
+        scheduler.suspend(reason: .displaySleep)
+        try await sleep(60)
+        rec.clear()
+        scheduler.deliverNow([.processes])
+        try await sleep(50)
+        scheduler.stop()
+        #expect(rec.events.isEmpty, "deliverNow delivered while suspended: \(rec.events.map(\.due))")
+    }
+
     @Test func baselineHookFiresOnStartAndOnlyOnRealResume() async throws {
         let queue = DispatchQueue(label: "test.sched.baseline", qos: .utility)
         let scheduler = SamplingScheduler(queue: queue, cadenceScale: 0.05)
