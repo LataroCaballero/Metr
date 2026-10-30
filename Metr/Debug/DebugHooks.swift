@@ -33,6 +33,18 @@ nonisolated enum DebugHooks {
         #endif
     }
 
+    /// Pids whose memory and CPU are logged on every process batch (`probe pid=...` lines), so
+    /// `scripts/verify/procs-vs-top.sh` can compare them with top. A comma list of integers.
+    /// Release returns an empty set and holds no environment name.
+    static var probePIDs: Set<Int32> {
+        #if DEBUG
+        guard let raw = ProcessInfo.processInfo.environment["METR_DEBUG_PROBE_PIDS"] else { return [] }
+        return Set(raw.split(separator: ",").compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) })
+        #else
+        return []
+        #endif
+    }
+
     /// Multiplies every sampling interval so timing tests can run quickly. Clamped to 0.01...10.
     static var cadenceScale: Double {
         #if DEBUG

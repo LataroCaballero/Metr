@@ -126,9 +126,11 @@ enum ProcessKernel {
     }
 }
 
-/// Samples the user's own processes. Confined to the sampler queue like `CPUCollector`; not Sendable.
+/// Samples every process the machine shows. Own-uid processes come from libproc; other-uid and
+/// root processes are merged from a streamed top (`TopSnapshotSource`, owner decision Q1).
+/// Confined to the sampler queue like `CPUCollector`; not Sendable.
 ///
-/// Memory is the physical footprint. CPU is percent of one core and can exceed 100 (D-11). The
+/// Memory is the physical footprint, never RSS. CPU is percent of one core and can exceed 100 (D-11). The
 /// first reading of an identity has memory and a nil CPU; CPU is known from the second on (D-20).
 /// Everything kept per process is keyed by identity and pruned to the processes alive at each
 /// sample, so the bookkeeping is bounded by the live process set (T-02-09).
@@ -142,6 +144,7 @@ public final class ProcessCollector {
     }
 
     private let sources: ProcessSources
+    private let top: (any TopSnapshotSource)?
     private let minimumCPUWindowNanos: UInt64
     private var tracked: [ProcessIdentity: Tracked] = [:]
     private var sequence: UInt64 = 0
@@ -154,64 +157,116 @@ public final class ProcessCollector {
         minimumCPUWindowNanos: UInt64 = 500_000_000
     ) {
         self.sources = sources
+        self.top = top
         self.minimumCPUWindowNanos = minimumCPUWindowNanos
     }
 
     /// How many identities hold a baseline and a cached path. Bounded by the live process set.
     var trackedIdentityCount: Int { tracked.count }
 
-    /// Own-uid processes only; other users arrive in plan 02-06. `.unavailable` when the kernel
-    /// table could not be read, never an empty list standing in for a failure.
+    /// Own-uid processes from libproc and other-uid processes from top. `.unavailable` when the
+    /// kernel table could not be read, never an empty list standing in for a failure.
     public func sample() -> Reading<ProcessSnapshot> {
         guard let entries = sources.listAll() else { return .unavailable }
         let now = sources.now()
+        startTopIfNeeded()
+        let block = top?.latest()
         var samples: [ProcessSample] = []
         samples.reserveCapacity(entries.count / 2)
         var seen = Set<ProcessIdentity>()
-        seen.reserveCapacity(entries.count / 2)
-        var anyCPU = false
-        for entry in entries where entry.uid == sources.selfUID {
+        seen.reserveCapacity(entries.count)
+        var anyOwnCPU = false
+        for entry in entries {
             let pid = entry.identity.pid
-            // A process that exited between the table read and now has no usage: skip it.
-            guard let usage = sources.usage(pid) else { continue }
-            seen.insert(entry.identity)
-            var item: Tracked
-            var cpu: Double?
-            if let known = tracked[entry.identity] {
-                item = known
-                if now > known.wall, now - known.wall >= minimumCPUWindowNanos {
-                    let used = usage.cpuNanos >= known.cpuNanos ? usage.cpuNanos - known.cpuNanos : 0
-                    cpu = Double(used) / Double(now - known.wall) * 100
-                    item.cpuNanos = usage.cpuNanos
-                    item.wall = now
-                    item.lastCPU = cpu
+            if entry.uid == sources.selfUID {
+                // A process that exited between the table read and now has no usage: skip it.
+                guard let usage = sources.usage(pid) else { continue }
+                seen.insert(entry.identity)
+                var item: Tracked
+                var cpu: Double?
+                if let known = tracked[entry.identity] {
+                    item = known
+                    if now > known.wall, now - known.wall >= minimumCPUWindowNanos {
+                        let used = usage.cpuNanos >= known.cpuNanos ? usage.cpuNanos - known.cpuNanos : 0
+                        cpu = Double(used) / Double(now - known.wall) * 100
+                        item.cpuNanos = usage.cpuNanos
+                        item.wall = now
+                        item.lastCPU = cpu
+                    } else {
+                        cpu = known.lastCPU
+                    }
                 } else {
-                    cpu = known.lastCPU
+                    // First sight: a baseline, and the path is resolved once for this identity.
+                    item = Tracked(cpuNanos: usage.cpuNanos, wall: now, lastCPU: nil, path: sources.path(pid))
                 }
+                if cpu != nil { anyOwnCPU = true }
+                tracked[entry.identity] = item
+                if isOwnTopChild(entry, path: item.path) { continue }
+                samples.append(
+                    ProcessSample(
+                        identity: entry.identity, ppid: entry.ppid, uid: entry.uid,
+                        path: item.path, command: entry.command,
+                        cpuPercent: cpu, footprintBytes: usage.footprintBytes))
             } else {
-                // First sight: a baseline, and the path is resolved once for this identity.
-                item = Tracked(cpuNanos: usage.cpuNanos, wall: now, lastCPU: nil, path: sources.path(pid))
+                // Another user's process: libproc cannot read it, top can. The path is still
+                // resolved once so root-owned .app bundles group like user apps (owner decision Q5).
+                seen.insert(entry.identity)
+                let path: String?
+                if let known = tracked[entry.identity] {
+                    path = known.path
+                } else {
+                    path = sources.path(pid)
+                    tracked[entry.identity] = Tracked(cpuNanos: 0, wall: now, lastCPU: nil, path: path)
+                }
+                if isOwnTopChild(entry, path: path) { continue }
+                // A row is applied only to a process that started before the block's sampling
+                // window began; a later holder of the pid waits for the next block (T-02-15).
+                guard let block, let row = block.rows[pid],
+                    entry.identity.startMicros < block.notBeforeMicros
+                else { continue }
+                samples.append(
+                    ProcessSample(
+                        identity: entry.identity, ppid: entry.ppid, uid: entry.uid,
+                        path: path, command: entry.command,
+                        cpuPercent: block.cpuValid ? row.cpuPercent : nil,
+                        footprintBytes: row.footprintBytes))
             }
-            if cpu != nil { anyCPU = true }
-            tracked[entry.identity] = item
-            samples.append(
-                ProcessSample(
-                    identity: entry.identity, ppid: entry.ppid, uid: entry.uid,
-                    path: item.path, command: entry.command,
-                    cpuPercent: cpu, footprintBytes: usage.footprintBytes))
         }
         // Every seen identity is tracked, so equal counts mean equal sets.
         if tracked.count > seen.count {
             tracked = tracked.filter { seen.contains($0.key) }
         }
-        if anyCPU { cpuReadySeen = true }
+        if anyOwnCPU { cpuReadySeen = true }
+        let otherUsers = otherUsersState(block: block)
+        let cpuReady = cpuReadySeen && (otherUsers == .unavailable || block?.cpuValid == true)
         sequence += 1
-        return .value(ProcessSnapshot(sequence: sequence, processes: samples, cpuReady: cpuReadySeen))
+        return .value(
+            ProcessSnapshot(sequence: sequence, processes: samples, cpuReady: cpuReady, otherUsers: otherUsers))
+    }
+
+    private func startTopIfNeeded() {
+        guard let top else { return }
+        if top.state == .stopped { top.start() }
+    }
+
+    private func otherUsersState(block: TopBlock?) -> OtherUsersState {
+        guard let top else { return .unavailable }
+        switch top.state {
+        case .failed: return .unavailable
+        case .running: return block != nil ? .available : .pending
+        case .stopped, .starting: return .pending
+        }
+    }
+
+    /// Metr's own top child (a child of this process running /usr/bin/top) must not rank.
+    private func isOwnTopChild(_ entry: ProcessEntry, path: String?) -> Bool {
+        entry.ppid == sources.selfPID && path == "/usr/bin/top"
     }
 
     /// Forgets every baseline and cached path: the next sample is a baseline again.
     public func reset() {
         tracked.removeAll()
         cpuReadySeen = false
+        top?.stop()
     }
 }

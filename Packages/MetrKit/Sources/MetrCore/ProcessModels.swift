@@ -79,7 +79,8 @@ public struct ProcessSnapshot: Sendable, Equatable {
     public var processes: [ProcessSample]
     /// True once CPU is known for at least one process (the second reading after an open, D-20).
     public var cpuReady: Bool
-    /// Whether system and other-user processes are in `processes` (RED skeleton).
+    /// Whether system and other-user processes are in `processes`: `.pending` until top's first
+    /// block, `.unavailable` when top is missing or failing (the list is then the user's own).
     public var otherUsers: OtherUsersState
 
     public init(

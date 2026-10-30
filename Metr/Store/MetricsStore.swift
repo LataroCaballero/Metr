@@ -74,6 +74,7 @@ final class MetricsStore {
         if let reading = batch.processes {
             processes = reading
             DebugHooks.log(Self.describe(processes: reading))
+            for line in Self.describeProbes(reading, pids: DebugHooks.probePIDs) { DebugHooks.log(line) }
         }
         diskTint = TintLogic.disk(freeFraction: disk.value?.freeFraction, previous: diskTint)
         didApply?()
@@ -90,6 +91,18 @@ final class MetricsStore {
             let own = snapshot.processes.filter { $0.uid == me }.count
             return "procs n=\(snapshot.processes.count) own=\(own)"
                 + " other=\(snapshot.processes.count - own) ready=\(snapshot.cpuReady ? 1 : 0)"
+                + " sys=\(snapshot.otherUsers.rawValue)"
+        }
+    }
+
+    /// One line per probe pid present in the batch (DEBUG, opt-in): pids and numbers only, never a
+    /// name or a path. For scripts/verify/procs-vs-top.sh.
+    private static func describeProbes(_ reading: Reading<ProcessSnapshot>, pids: Set<Int32>) -> [String] {
+        guard !pids.isEmpty, case .value(let snapshot) = reading else { return [] }
+        return snapshot.processes.filter { pids.contains($0.identity.pid) }.map { sample in
+            let mem = sample.footprintBytes.map { String($0) } ?? "-"
+            let cpu = sample.cpuPercent.map { String(format: "%.1f", $0) } ?? "pending"
+            return "probe pid=\(sample.identity.pid) mem=\(mem) cpu=\(cpu)"
         }
     }
 

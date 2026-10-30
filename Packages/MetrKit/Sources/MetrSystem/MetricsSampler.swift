@@ -15,6 +15,9 @@ public final class MetricsSampler: @unchecked Sendable {
     private let memory = MemoryCollector()  // confined to `queue`
     private let disk = DiskCollector()  // confined to `queue`
     private let processes: ProcessCollector  // confined to `queue`
+    /// The one top child behind the process list. Started by the collector on the first process
+    /// sample and stopped by its `reset()`, so it exists only while the panel or window is open.
+    private let topStream: TopStream
     private var registry = DemandRegistry()  // confined to `queue`
     private var diagnostics: (@Sendable (String) -> Void)?  // confined to `queue`
     private var emit: (@Sendable (MetricsBatch) -> Void)?  // confined to `queue`
@@ -23,7 +26,9 @@ public final class MetricsSampler: @unchecked Sendable {
         scheduler = SamplingScheduler(queue: queue, cadenceScale: cadenceScale)
         // The CPU window floor scales with the cadence, like the scheduler's own.
         let scale = min(max(cadenceScale, SamplingPlan.scaleRange.lowerBound), SamplingPlan.scaleRange.upperBound)
-        processes = ProcessCollector(minimumCPUWindowNanos: UInt64(500_000_000 * scale))
+        let stream = TopStream()
+        topStream = stream
+        processes = ProcessCollector(top: stream, minimumCPUWindowNanos: UInt64(500_000_000 * scale))
     }
 
     /// Starts the scheduler. `diagnostics` receives plain log lines (never user-facing).
