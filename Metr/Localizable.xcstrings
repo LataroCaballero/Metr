@@ -468,6 +468,132 @@
           }
         }
       }
+    },
+    "Plenty of memory available.": {
+      "comment": "Status line sentence for Normal memory pressure (D-18)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hay memoria de sobra."
+          }
+        }
+      }
+    },
+    "Memory is getting tight.": {
+      "comment": "Status line sentence for Elevated memory pressure (D-18)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La memoria se está agotando."
+          }
+        }
+      }
+    },
+    "Memory is very low. Quit apps you don't need.": {
+      "comment": "Status line sentence for Critical memory pressure (D-18)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Queda muy poca memoria. Cierra las apps que no uses."
+          }
+        }
+      }
+    },
+    "Thermal.Normal": {
+      "comment": "Thermal state word after the Thermal label (masculine in Spanish)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "normal"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Normal"
+          }
+        }
+      }
+    },
+    "Thermal.Elevated": {
+      "comment": "Thermal state word after the Thermal label (masculine in Spanish)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "elevado"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elevated"
+          }
+        }
+      }
+    },
+    "Thermal.Critical": {
+      "comment": "Thermal state word after the Thermal label (masculine in Spanish)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "crítico"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Critical"
+          }
+        }
+      }
+    },
+    "Thermal state: %@": {
+      "comment": "VoiceOver suffix of the status line, e.g. Thermal state: Normal",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estado térmico: %@"
+          }
+        }
+      }
+    },
+    "%@ · %@": {
+      "comment": "Status line: pressure sentence, a middle dot, then the thermal phrase",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "Thermal %@": {
+      "comment": "Thermal phrase: label and state word joined by a no-break space so they never split across lines, e.g. Thermal Normal",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estado térmico %@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

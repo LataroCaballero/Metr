@@ -15,6 +15,8 @@ struct PanelView: View {
             RingsSection(store: store)
                 .padding(24)
             Divider()
+            StatusLine(store: store)
+            Divider()
             HStack {
                 // The leading side stays empty; Phase 3 adds "Open Window" here.
                 #if DEBUG
@@ -200,6 +202,81 @@ private struct RingsSection: View {
         case .normal: String(localized: "Normal pressure")
         case .warn: String(localized: "Elevated pressure")
         case .critical: String(localized: "Critical pressure")
+        }
+    }
+}
+
+/// The quiet band under the rings: the plain-language pressure sentence and the always-visible
+/// thermal state (D-01, D-05, D-18, D-19; PANEL-02, PANEL-05).
+///
+/// Two text lines are reserved permanently (44 pt with padding), so a pressure or thermal change
+/// while the popover is open never resizes it (E4). The line is built from `Text` interpolation of
+/// `Text` values: the `Text + Text` operator is deprecated on macOS 26 (RESEARCH Pitfall 12).
+private struct StatusLine: View {
+    let store: MetricsStore
+
+    var body: some View {
+        let sentence = store.memory.value.map { Self.sentence($0.pressure) }
+        let word = Self.thermalWord(store.thermal)
+        let text = Self.line(sentence: sentence, thermal: store.thermal)
+        // The invisible copy reserves two lines; the visible copy sits centered over it, so a
+        // one-line message is vertically centered in the reserved space (UI-SPEC "Status line").
+        return text
+            .lineLimit(2, reservesSpace: true)
+            .opacity(0)
+            .overlay { text.lineLimit(2) }
+            .font(.subheadline)
+            .foregroundStyle(Color.secondary)
+            .multilineTextAlignment(.center)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 24)
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Self.spoken(sentence: sentence, word: word))
+    }
+
+    /// `<sentence> · Thermal <state>`, or the thermal phrase alone when the pressure level is
+    /// unreadable (E4 error). Only the state word is tinted, Normal stays secondary (D-05).
+    private static func line(sentence: String?, thermal: ThermalLevel) -> Text {
+        let state: Text = {
+            let word = Text(verbatim: thermalWord(thermal))
+            guard let color = TintPalette.color(for: thermal.tint) else {
+                return word.foregroundStyle(Color.secondary)
+            }
+            return word.fontWeight(.semibold).foregroundStyle(Color(nsColor: color))
+        }()
+        // The label and the state word are joined by a no-break space so the phrase never splits
+        // across the two lines. One catalog key holds the label, the space and the word slot, so ES
+        // can word the whole phrase ("Estado térmico normal").
+        let phrase = Text("Thermal\u{00A0}\(state)")
+        guard let sentence else { return phrase }
+        return Text("\(Text(verbatim: sentence)) · \(phrase)")
+    }
+
+    private static func spoken(sentence: String?, word: String) -> String {
+        let thermal = String(localized: "Thermal state: \(word)")
+        guard let sentence else { return thermal }
+        return sentence + " " + thermal
+    }
+
+    /// D-18, keyed off the same kernel level as the Memory ring so ring, word and sentence agree.
+    private static func sentence(_ pressure: MemoryPressure) -> String {
+        switch pressure {
+        case .normal: String(localized: "Plenty of memory available.")
+        case .warn: String(localized: "Memory is getting tight.")
+        case .critical: String(localized: "Memory is very low. Quit apps you don't need.")
+        }
+    }
+
+    /// Masculine state words, separate keys from the feminine memory-pressure words in ES.
+    private static func thermalWord(_ level: ThermalLevel) -> String {
+        switch level {
+        case .normal:
+            String(localized: "Thermal.Normal", defaultValue: "Normal", comment: "Thermal state word after the Thermal label")
+        case .elevated:
+            String(localized: "Thermal.Elevated", defaultValue: "Elevated", comment: "Thermal state word after the Thermal label")
+        case .critical:
+            String(localized: "Thermal.Critical", defaultValue: "Critical", comment: "Thermal state word after the Thermal label")
         }
     }
 }

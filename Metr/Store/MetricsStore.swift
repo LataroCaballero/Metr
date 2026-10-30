@@ -17,6 +17,30 @@ final class MetricsStore {
     /// Empty when the layout cannot be read. They name the cluster bars while CPU is not yet sampled.
     let coreLevelNames: [String] = CPUCollector.readLayout()?.levels.map(\.name) ?? []
 
+    /// The Mac's thermal state (PANEL-05). Read once at init and on the system's change
+    /// notification; never polled (D-19).
+    private(set) var thermal: ThermalLevel = ThermalReader.current()
+
+    /// Token of the thermal change observer; kept so the block stays registered.
+    @ObservationIgnored private var thermalToken: (any NSObjectProtocol)?
+
+    init() {
+        // ProcessInfo can post from any thread, and a MainActor selector invoked off-main traps
+        // under Swift 6, so the observer is a block on the main queue (T-01-08).
+        thermalToken = NotificationCenter.default.addObserver(
+            forName: ThermalReader.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyThermal(ThermalReader.current()) }
+        }
+    }
+
+    /// Applies a new thermal level and logs it when it changed. DEBUG log only.
+    func applyThermal(_ level: ThermalLevel) {
+        guard level != thermal else { return }
+        thermal = level
+        DebugHooks.log("thermal=\(level.rawValue)")
+    }
+
     /// Memory tint straight from the pressure level (D-01); it has no hysteresis of its own.
     var memoryTint: RingTint { TintLogic.memory(memory.value?.pressure) }
 
@@ -46,12 +70,13 @@ final class MetricsStore {
         }
         diskTint = TintLogic.disk(freeFraction: disk.value?.freeFraction, previous: diskTint)
         didApply?()
-        DebugHooks.log(Self.describe(cpu: cpu, memory: memory, disk: disk))
+        DebugHooks.log(Self.describe(cpu: cpu, memory: memory, disk: disk, thermal: thermal))
     }
 
     /// Pending and unavailable readings are named, never printed as a number.
     private static func describe(
-        cpu: Reading<CPUReading>, memory: Reading<MemoryReading>, disk: Reading<DiskReading>
+        cpu: Reading<CPUReading>, memory: Reading<MemoryReading>, disk: Reading<DiskReading>,
+        thermal: ThermalLevel
     ) -> String {
         "batch cpu=\(text(cpu.value.map(\.total), cpu)) mem=\(text(memory.value?.ringFill, memory))"
             + " disk=\(text(disk.value?.usedFraction, disk))"
@@ -59,6 +84,8 @@ final class MetricsStore {
             // PANEL-01: the CPU split, for scripts/verify/cpu-vs-top.sh. DEBUG log only.
             + " cpuuser=\(text(cpu.value.map(\.user), cpu)) cpusys=\(text(cpu.value.map(\.system), cpu))"
             + " clusters=\(clustersText(cpu))"
+            // PANEL-05: the thermal level, for scripts/verify/run-debug.sh. DEBUG log only.
+            + " thermal=\(thermal.rawValue)"
     }
 
     /// `Name:0.00,Name:0.00`, `none` when the value has no clusters, or the pending / unavailable word.
