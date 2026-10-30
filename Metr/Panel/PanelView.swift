@@ -10,6 +10,12 @@ struct PanelView: View {
     /// Closes the panel. Called on Esc (`onExitCommand`); the default keeps `PanelView(store:)` compiling.
     var onClose: () -> Void = {}
 
+    /// True while the other-users half of the process list cannot be read (E5 partial): the panel
+    /// says so instead of silently showing an incomplete list. Clears on the next successful read.
+    private var systemProcessesMissing: Bool {
+        store.processes.value?.otherUsers == .unavailable
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             RingsSection(store: store)
@@ -20,7 +26,15 @@ struct PanelView: View {
             TopAppsSection(store: store)
             Divider()
             HStack {
-                // The leading side stays empty; Phase 3 adds "Open Window" here.
+                // The leading side holds the partial-state line; Phase 3 adds "Open Window" here.
+                // The footer height is set by the Quit button, so the line never resizes the panel.
+                if systemProcessesMissing {
+                    Text("System processes not shown.")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
                 #if DEBUG
                 if DebugHooks.shellSpikeEnabled {
                     Button {

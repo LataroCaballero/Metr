@@ -112,6 +112,8 @@ enum DebugSnapshotRenderer {
             // The same list with system rows among the top five: WindowServer, kernel_task and a
             // root-owned app group, each with the lock after its name (PROC-01, D-09; owner decision Q5).
             Fixture(name: "apps-system", batch: appsBatch(processes: appsSystemSnapshot)),
+            // System processes could not be read: own rows only and the footer says so (E5 partial).
+            Fixture(name: "apps-partial", batch: appsBatch(processes: appsPartialSnapshot)),
         ]
     }
 
@@ -161,6 +163,13 @@ enum DebugSnapshotRenderer {
             system(302, uid: 0, path: agent + "/Helpers/Agent Updater", "Agent Updater", cpu: 8, mib: 40),
         ]
         return ProcessSnapshot(sequence: 1, processes: rows + own, cpuReady: true, otherUsers: .available)
+    }
+
+    /// `apps-partial`: the `apps` rows with the other-users half unavailable.
+    private static var appsPartialSnapshot: ProcessSnapshot {
+        var snapshot = appsSnapshot
+        snapshot.otherUsers = .unavailable
+        return snapshot
     }
 
     /// Synthetic own-uid processes for the `apps` fixture: Chrome with its helpers, three system

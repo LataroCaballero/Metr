@@ -685,6 +685,18 @@
         }
       }
     },
+    "System processes not shown.": {
+      "comment": "Footer line shown while system and other-user processes cannot be read, so the list is not silently incomplete (E5 partial)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sin procesos del sistema."
+          }
+        }
+      }
+    },
     "%@, CPU %@, memory %@": {
       "comment": "VoiceOver reading of one app row: name, CPU percent, memory size",
       "extractionState": "manual",
