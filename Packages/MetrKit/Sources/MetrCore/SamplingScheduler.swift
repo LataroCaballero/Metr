@@ -127,12 +127,13 @@ public final class SamplingScheduler: @unchecked Sendable {
         }
     }
 
-    /// Start or resume: an immediate all-metrics tick takes the baselines, then a short
-    /// priming fire (cpu only) delivers the first real CPU delta before the normal cadence.
+    /// Start or resume: an immediate tick of the plan's own metrics takes the baselines, then a
+    /// short priming fire (cpu only) delivers the first real CPU delta before the normal cadence.
+    /// Only metrics in the plan are delivered, so an idle start or wake never reads processes (D-20).
     private func beginRunning() {
         onBaseline?()
         primePending = true
-        deliver(due: Set(Metric.allCases), elapsed: 0, priming: false)
+        deliver(due: Set(plan.cadence.keys), elapsed: 0, priming: false)
         startTimer()
     }
 

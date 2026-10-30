@@ -10,6 +10,9 @@ final class MetricsStore {
     private(set) var cpu: Reading<CPUReading> = .pending
     private(set) var memory: Reading<MemoryReading> = .pending
     private(set) var disk: Reading<DiskReading> = .pending
+    /// The user's processes, sampled only while the panel or window is open (D-20). `.pending`
+    /// until the first reading and again after the last close.
+    private(set) var processes: Reading<ProcessSnapshot> = .pending
     /// Disk tint with its 1-point hysteresis (D-03). One state shared by the glyph and the panel.
     private(set) var diskTint: RingTint = .none
 
@@ -68,9 +71,26 @@ final class MetricsStore {
         if let reading = batch.disk {
             disk = reading
         }
+        if let reading = batch.processes {
+            processes = reading
+            DebugHooks.log(Self.describe(processes: reading))
+        }
         diskTint = TintLogic.disk(freeFraction: disk.value?.freeFraction, previous: diskTint)
         didApply?()
         DebugHooks.log(Self.describe(cpu: cpu, memory: memory, disk: disk, thermal: thermal))
+    }
+
+    /// Counts and a ready flag only: never a process name, path or command line (T-02-08).
+    private static func describe(processes reading: Reading<ProcessSnapshot>) -> String {
+        switch reading {
+        case .pending: return "procs pending"
+        case .unavailable: return "procs unavailable"
+        case .value(let snapshot):
+            let me = getuid()
+            let own = snapshot.processes.filter { $0.uid == me }.count
+            return "procs n=\(snapshot.processes.count) own=\(own)"
+                + " other=\(snapshot.processes.count - own) ready=\(snapshot.cpuReady ? 1 : 0)"
+        }
     }
 
     /// Pending and unavailable readings are named, never printed as a number.

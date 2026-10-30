@@ -1,6 +1,12 @@
 import Foundation
 import MetrCore
 
+/// The three metrics the tooltip speaks about. Narrower than `Metric`, which also names the
+/// process list that the hover tooltip never mentions.
+public enum TooltipMetric: Sendable {
+    case cpu, memory, disk
+}
+
 /// The localized sentence shapes of the tooltip. The app supplies them from its String Catalog;
 /// tests supply literal EN and ES ones. Every closure receives already formatted numbers.
 public struct TooltipTemplates: Sendable {
@@ -13,14 +19,14 @@ public struct TooltipTemplates: Sendable {
     /// "Disk: 210 GB free of 494 GB" from the free amount and the total.
     public var disk: @Sendable (String, String) -> String
     /// "Memory: unavailable" for a metric whose read failed.
-    public var unavailable: @Sendable (Metric) -> String
+    public var unavailable: @Sendable (TooltipMetric) -> String
 
     public init(
         cpu: @escaping @Sendable (String) -> String,
         memory: @escaping @Sendable (MemoryPressure, String, String) -> String,
         swapSuffix: @escaping @Sendable (String) -> String,
         disk: @escaping @Sendable (String, String) -> String,
-        unavailable: @escaping @Sendable (Metric) -> String
+        unavailable: @escaping @Sendable (TooltipMetric) -> String
     ) {
         self.cpu = cpu
         self.memory = memory

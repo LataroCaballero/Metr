@@ -1,10 +1,12 @@
-/// A metric the sampler can collect on its own cadence.
+/// A metric the sampler can collect on its own cadence. `processes` is last, so the log order
+/// stays cpu,memory,disk,processes. It exists only in the panel and window cadences (D-20).
 public enum Metric: String, Sendable, Hashable, CaseIterable {
-    case cpu, memory, disk
+    case cpu, memory, disk, processes
 }
 
 /// Who is asking for faster sampling. Only the popover delegate registers `.panel`;
-/// `.window` is reserved for Phase 3 and is not registered by anything yet.
+/// `.window` is reserved for Phase 3 and is not registered by anything yet. Either one also
+/// switches the process list on; with neither, no process is read at all.
 public enum DemandConsumer: String, Sendable, Hashable {
     case panel, window
 }
@@ -40,6 +42,9 @@ public struct SamplingPlan: Sendable, Equatable {
     public static let panelDisk = 10.0
     public static let windowCPUMemory = 1.0
     public static let windowDisk = 10.0
+    /// The roadmap's "2 s or slower" for the process list; absent from the idle tier (D-20).
+    public static let panelProcesses = 2.0
+    public static let windowProcesses = 2.0
 
     /// A CPU delta over a window shorter than this is noise, so CPU is not due sooner.
     public static let minimumCPUWindow = 0.5
@@ -60,18 +65,21 @@ public struct SamplingPlan: Sendable, Equatable {
         let fast: Double
         let disk: Double
         let base: Double
+        let processes: Double?
         if demand.contains(.window) {
-            (tier, fast, disk, base) = (.window, windowCPUMemory, windowDisk, 1)
+            (tier, fast, disk, base, processes) = (.window, windowCPUMemory, windowDisk, 1, windowProcesses)
         } else if demand.contains(.panel) {
-            (tier, fast, disk, base) = (.panel, panelCPUMemory, panelDisk, 1)
+            (tier, fast, disk, base, processes) = (.panel, panelCPUMemory, panelDisk, 1, panelProcesses)
         } else {
-            (tier, fast, disk, base) = (.idle, idleCPUMemory, idleDisk, 2)
+            (tier, fast, disk, base, processes) = (.idle, idleCPUMemory, idleDisk, 2, nil)
         }
         let k = (constrained ? 2.0 : 1.0) * scale
+        var cadence: [Metric: Double] = [.cpu: fast * k, .memory: fast * k, .disk: disk * k]
+        if let processes { cadence[.processes] = processes * k }
         return SamplingPlan(
             tier: tier,
             baseInterval: base * k,
-            cadence: [.cpu: fast * k, .memory: fast * k, .disk: disk * k],
+            cadence: cadence,
             constrained: constrained,
             cadenceScale: scale)
     }
