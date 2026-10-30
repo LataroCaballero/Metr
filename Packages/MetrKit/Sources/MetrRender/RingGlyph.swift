@@ -150,11 +150,8 @@ public enum RingGlyph {
     }
 
     private static func arcColor(for tint: RingTint, neutral: NSColor) -> NSColor {
-        switch tint {
-        case .none: neutral
-        case .warning: .systemYellow
-        case .critical: .systemRed
-        }
+        // One definition of Elevated (orange) and Critical (red) for the whole app.
+        TintPalette.color(for: tint) ?? neutral
     }
 
     private static func drawRing(

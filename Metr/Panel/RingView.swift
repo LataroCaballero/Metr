@@ -1,4 +1,5 @@
 import MetrCore
+import MetrRender
 import SwiftUI
 
 /// One large panel ring: a neutral track, an arc that fills clockwise from 12 o'clock, and an SF Symbol.
@@ -36,10 +37,7 @@ struct RingView: View {
     }
 
     private var arcColor: Color {
-        switch tint {
-        case .none: Color.primary
-        case .warning: Color.yellow
-        case .critical: Color.red
-        }
+        // The palette owns Elevated (orange) and Critical (red); the app draws them, never its own.
+        TintPalette.color(for: tint).map { Color(nsColor: $0) } ?? Color.primary
     }
 }

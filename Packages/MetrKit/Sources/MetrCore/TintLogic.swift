@@ -20,8 +20,8 @@ public enum TintLogic {
     }
 
     /// Disk tint from the free fraction with 1-point hysteresis (D-03).
-    /// Enter: yellow below 10 % free, red below 5 %. Leave: red falls to yellow at 6 % or more,
-    /// anything returns to neutral at 11 % or more.
+    /// Enter: warning (the Elevated orange) below 10 % free, critical (red) below 5 %.
+    /// Leave: critical falls to warning at 6 % or more, anything returns to neutral at 11 % or more.
     public static func disk(freeFraction: Double?, previous: RingTint) -> RingTint {
         guard let free = freeFraction else { return .none }
         switch previous {
