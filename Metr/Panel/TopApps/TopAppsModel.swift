@@ -33,6 +33,8 @@ struct TopAppRowData: Identifiable, Equatable {
     let icon: NSImage
     let cpuPercent: Double?
     let footprintBytes: UInt64?
+    /// Who owns the row, from pid, uid and canonical path only (D-09). `.system` rows show a lock.
+    let kind: ProcessKind
     /// How many helpers the group has. Above zero the row has a disclosure chevron.
     let helperCount: Int
     /// Present only while this group is the open one: its three heaviest helpers (D-08).
@@ -189,6 +191,7 @@ final class TopAppsModel {
             icon: icon(forAppAt: group.appPath),
             cpuPercent: group.cpuPercent,
             footprintBytes: group.footprintBytes,
+            kind: ProcessClassifier.kind(of: group, selfPID: getpid(), selfUID: getuid()),
             helperCount: group.helpers.count,
             helpers: helpers,
             moreCount: more)

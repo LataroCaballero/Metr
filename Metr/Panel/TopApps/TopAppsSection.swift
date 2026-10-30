@@ -102,6 +102,9 @@ private struct AppRow: View {
         let expandsLabel =
             data.isExpanded
             ? String(localized: "Collapse \(data.name)") : String(localized: "Expand \(data.name)")
+        let reading = String(localized: "\(data.name), CPU \(cpu), memory \(memory)")
+        // A system row adds "System process" for VoiceOver (D-09).
+        let spoken = data.kind == .system ? reading + ", " + String(localized: "System process") : reading
         HStack(spacing: 0) {
             gutter(label: expandsLabel)
             Color.clear.frame(width: 4)
@@ -111,13 +114,7 @@ private struct AppRow: View {
                 .frame(width: 20, height: 20)
                 .accessibilityHidden(true)
             Color.clear.frame(width: 8)
-            Text(verbatim: data.name)
-                .font(.body)
-                .foregroundStyle(Color.primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(minWidth: 112, maxWidth: .infinity, alignment: .leading)
-                .help(data.name)
+            nameSlot
             Color.clear.frame(width: 8)
             number(cpu, active: effectiveSort == .cpu)
                 .minimumScaleFactor(0.85)
@@ -134,12 +131,34 @@ private struct AppRow: View {
         // Tapping anywhere on a group row toggles it; a row with no helpers is not a control.
         .onTapGesture { if data.helperCount > 0 { animatedToggle() } }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(String(localized: "\(data.name), CPU \(cpu), memory \(memory)"))
+        .accessibilityLabel(spoken)
         .accessibilityActions {
             if data.helperCount > 0 {
                 Button(expandsLabel) { animatedToggle() }
             }
         }
+    }
+
+    /// The name, then the lock of a system row right after it. Both sit inside the flexible name
+    /// slot, so the number columns never move (D-09, UI-SPEC "Lock marker"). Other-user rows get
+    /// no lock; their actions are disabled by plan 02-10.
+    private var nameSlot: some View {
+        HStack(spacing: 4) {
+            Text(verbatim: data.name)
+                .font(.body)
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if data.kind == .system {
+                Image(systemName: "lock.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.secondary)
+                    .layoutPriority(1)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(minWidth: 112, maxWidth: .infinity, alignment: .leading)
+        .help(data.name)
     }
 
     /// The 12 pt disclosure gutter: a chevron on a group with helpers, empty otherwise.

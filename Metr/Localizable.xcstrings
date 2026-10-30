@@ -673,6 +673,18 @@
         }
       }
     },
+    "System process": {
+      "comment": "VoiceOver suffix on a system row in the Top Apps list, and the reason line of its disabled actions (D-09)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proceso del sistema"
+          }
+        }
+      }
+    },
     "%@, CPU %@, memory %@": {
       "comment": "VoiceOver reading of one app row: name, CPU percent, memory size",
       "extractionState": "manual",

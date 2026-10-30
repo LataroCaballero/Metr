@@ -108,24 +108,59 @@ enum DebugSnapshotRenderer {
                 batch: MetricsBatch(cpu: .unavailable, memory: .unavailable, disk: .unavailable, elapsed: 1)),
             // The Top Apps list with a multi-process browser, system apps and a busy tool
             // (PANEL-04, PROC-02, PROC-03). Synthetic values; the Chrome members sum to 182 % and 2.1 GB.
-            Fixture(
-                name: "apps",
-                batch: MetricsBatch(
-                    cpu: .value(
-                        CPUReading(
-                            total: 0.34, user: 0.22, system: 0.12,
-                            clusters: [
-                                CPUCluster(name: "Performance", usage: 0.41),
-                                CPUCluster(name: "Efficiency", usage: 0.18),
-                            ])),
-                    memory: .value(
-                        MemoryReading(
-                            usedBytes: 12_025_908_428, totalBytes: totalMemory,
-                            swapUsedBytes: 0, freePercent: 60, pressure: .normal)),
-                    disk: .value(DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)),
-                    processes: .value(appsSnapshot),
-                    elapsed: 1)),
+            Fixture(name: "apps", batch: appsBatch(processes: appsSnapshot)),
+            // The same list with system rows among the top five: WindowServer, kernel_task and a
+            // root-owned app group, each with the lock after its name (PROC-01, D-09; owner decision Q5).
+            Fixture(name: "apps-system", batch: appsBatch(processes: appsSystemSnapshot)),
         ]
+    }
+
+    /// The batch shared by the Top Apps fixtures: a busy-but-normal Mac with the given process reading.
+    private static func appsBatch(processes: ProcessSnapshot) -> MetricsBatch {
+        MetricsBatch(
+            cpu: .value(
+                CPUReading(
+                    total: 0.34, user: 0.22, system: 0.12,
+                    clusters: [
+                        CPUCluster(name: "Performance", usage: 0.41),
+                        CPUCluster(name: "Efficiency", usage: 0.18),
+                    ])),
+            memory: .value(
+                MemoryReading(
+                    usedBytes: 12_025_908_428, totalBytes: totalMemory,
+                    swapUsedBytes: 0, freePercent: 60, pressure: .normal)),
+            disk: .value(DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)),
+            processes: .value(processes),
+            elapsed: 1)
+    }
+
+    /// `apps-system`: Chrome and Safari from the `apps` set plus three system rows, so the top five
+    /// by CPU are Chrome (182 %), the root-owned Agent group (50 %), kernel_task (18 %),
+    /// WindowServer (12 %) and Safari (9 %).
+    private static var appsSystemSnapshot: ProcessSnapshot {
+        let mib: UInt64 = 1_048_576
+        let own = appsSnapshot.processes.filter {
+            $0.path?.contains("/Google Chrome.app/") == true || $0.path?.contains("/Safari.app/") == true
+        }
+        func system(_ pid: Int32, uid: UInt32, path: String?, _ command: String, cpu: Double, mib size: UInt64)
+            -> ProcessSample
+        {
+            ProcessSample(
+                identity: ProcessIdentity(pid: pid, startMicros: Int64(pid) * 1_000),
+                ppid: 1, uid: uid, path: path, command: command, cpuPercent: cpu, footprintBytes: size * mib)
+        }
+        let agent = "/Library/Application Support/Vendor/Agent.app/Contents"
+        let rows = [
+            system(0, uid: 0, path: nil, "kernel_task", cpu: 18, mib: 900),
+            system(
+                190, uid: 88,
+                path: "/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer",
+                "WindowServer", cpu: 12, mib: 512),
+            system(300, uid: 0, path: agent + "/MacOS/Agent", "Agent", cpu: 30, mib: 240),
+            system(301, uid: 0, path: agent + "/Helpers/Agent Helper", "Agent Helper", cpu: 12, mib: 80),
+            system(302, uid: 0, path: agent + "/Helpers/Agent Updater", "Agent Updater", cpu: 8, mib: 40),
+        ]
+        return ProcessSnapshot(sequence: 1, processes: rows + own, cpuReady: true, otherUsers: .available)
     }
 
     /// Synthetic own-uid processes for the `apps` fixture: Chrome with its helpers, three system
