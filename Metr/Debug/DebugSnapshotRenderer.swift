@@ -17,6 +17,10 @@ enum DebugSnapshotRenderer {
 
     private static let totalMemory: UInt64 = 17_179_869_184
 
+    /// True while fixtures render, so AppKit-backed helper views can step aside: `ImageRenderer`
+    /// draws them as a "prohibited" badge over the content.
+    static var isRendering = false
+
     /// One fixture per column or status-line state worth looking at (PANEL-01/02/03/05, CPU-02).
     private static var fixtures: [Fixture] {
         [
@@ -212,6 +216,7 @@ enum DebugSnapshotRenderer {
 
     static func renderAndExit(to directory: URL) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        isRendering = true
         let language = Locale.current.language.languageCode?.identifier ?? "en"
         var panelCount = 0
         var welcomeCount = 0

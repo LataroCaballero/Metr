@@ -80,20 +80,69 @@ final class TopAppsModel {
     @ObservationIgnored private var nameCache: [String: String] = [:]
     @ObservationIgnored private var iconCache: [String: NSImage] = [:]
 
+    /// True while the pointer is over the list rows: the set and order of rows hold still so the
+    /// next click lands on the row the user aimed at (D-10, T-02-23). Observed, because a change
+    /// must re-evaluate the display.
+    private(set) var isPointerInList = false
+
+    /// The list's frame in screen coordinates, reported by the view. The watchdog compares the
+    /// pointer with it, because a transient popover may never deliver the hover end (RESEARCH A8).
+    @ObservationIgnored var listScreenFrame: CGRect?
+
+    /// The rows on screen the last time the display was built, in order (D-10). The ranking uses
+    /// them as the tie-break, and the freeze keeps them. Not observed: they are a function of the
+    /// readings, never a second live source of truth for what the view shows.
+    @ObservationIgnored private var previousApps: [String] = []
+    /// The same for the helpers of the open group.
+    @ObservationIgnored private var previousHelpers: (group: String, ids: [String])?
+    /// The last built display and what it was built from, so a re-render does no ranking work.
+    @ObservationIgnored private var memo: (key: MemoKey, display: TopAppsDisplay)?
+    @ObservationIgnored private var lastSort: SortColumn?
+
+    private struct MemoKey: Equatable {
+        var sequence: UInt64
+        var sort: SortColumn
+        var frozen: Bool
+        var expanded: String?
+    }
+
     init() {}
+
+    /// The view reports the pointer entering or leaving the list rows.
+    func setPointerInList(_ inside: Bool) {
+        if isPointerInList != inside { isPointerInList = inside }
+    }
+
+    /// Releases a freeze that outlived its pointer: when the pointer is outside the list's frame,
+    /// the hover end was missed. A pointer resting inside the frame never releases it (D-10).
+    /// Called after each process reading, so a stuck freeze lasts one tick at most.
+    func runFreezeWatchdog() {
+        guard isPointerInList, let frame = listScreenFrame else { return }
+        if !frame.contains(NSEvent.mouseLocation) { isPointerInList = false }
+    }
 
     /// Opens a group, or closes it when it is already open.
     func toggle(_ id: String) {
         expandedGroupID = expandedGroupID == id ? nil : id
+        previousHelpers = nil
     }
 
     /// Closes the open group once it is no longer on screen (it exited, or ranks out of the list).
     func collapse(unlessVisible visible: [String]) {
-        if let id = expandedGroupID, !visible.contains(id) { expandedGroupID = nil }
+        if let id = expandedGroupID, !visible.contains(id) {
+            expandedGroupID = nil
+            previousHelpers = nil
+        }
     }
 
     /// The rows for one reading. Grouping runs once per sequence; ranking and row building only
-    /// touch the groups, so a re-render costs five rows of work.
+    /// touch the groups, so a re-render costs five rows of work, and a re-render with nothing
+    /// changed costs none (the result is memoized).
+    ///
+    /// Ranking is `RankingEngine` (D-10, D-20): equal displayed values keep their previous order,
+    /// the list is memory-ranked until CPU is known and then ranks by the selection once, and
+    /// while the pointer is over the rows the set and order hold. Changing the segment re-ranks
+    /// at once even while frozen (an explicit user action, D-06).
     func display(for reading: Reading<ProcessSnapshot>, sort: SortColumn) -> TopAppsDisplay {
         switch reading {
         case .pending:
@@ -104,10 +153,29 @@ final class TopAppsModel {
             guard !snapshot.processes.isEmpty else {
                 return TopAppsDisplay(content: .unavailable, effectiveSort: sort)
             }
-            let effective: SortColumn = snapshot.cpuReady ? sort : .memory
-            let ranked = groups(for: snapshot).sorted { Self.precedes($0, $1, by: effective) }
-            let rows = ranked.prefix(Self.rowLimit).map { row(for: $0, sort: effective) }
-            return TopAppsDisplay(content: .rows(Array(rows)), effectiveSort: effective)
+            let key = MemoKey(
+                sequence: snapshot.sequence, sort: sort, frozen: isPointerInList, expanded: expandedGroupID)
+            if let memo, memo.key == key { return memo.display }
+
+            let sortChanged = lastSort != nil && lastSort != sort
+            let frozen = isPointerInList && !sortChanged
+            let effective = RankingEngine.effectiveColumn(sort, cpuReady: snapshot.cpuReady)
+            let byID = Dictionary(groups(for: snapshot).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let items = byID.values.map {
+                RankItem(
+                    id: $0.id, cpuPercent: $0.cpuPercent, footprintBytes: $0.footprintBytes,
+                    name: Self.sortName(of: $0))
+            }
+            let ids = RankingEngine.next(
+                items, column: sort, cpuReady: snapshot.cpuReady, previous: previousApps, frozen: frozen,
+                limit: Self.rowLimit)
+            let rows = ids.compactMap { byID[$0] }.map { row(for: $0, sort: effective, frozen: frozen) }
+            let display = TopAppsDisplay(content: .rows(rows), effectiveSort: effective)
+
+            previousApps = ids
+            lastSort = sort
+            memo = (key, display)
+            return display
         }
     }
 
@@ -124,39 +192,6 @@ final class TopAppsModel {
     }
 
     // MARK: Ranking
-
-    private static func precedes(_ a: ProcessGroup, _ b: ProcessGroup, by sort: SortColumn) -> Bool {
-        precedes(
-            (a.cpuPercent, a.footprintBytes, sortName(of: a)), (b.cpuPercent, b.footprintBytes, sortName(of: b)),
-            by: sort)
-    }
-
-    private static func precedes(_ a: ProcessSample, _ b: ProcessSample, by sort: SortColumn) -> Bool {
-        precedes(
-            (a.cpuPercent, a.footprintBytes, executableName(of: a)),
-            (b.cpuPercent, b.footprintBytes, executableName(of: b)), by: sort)
-    }
-
-    /// The active value descending (nil last), then footprint descending, then name (D-07).
-    private static func precedes(
-        _ a: (cpu: Double?, footprint: UInt64?, name: String),
-        _ b: (cpu: Double?, footprint: UInt64?, name: String), by sort: SortColumn
-    ) -> Bool {
-        let (x, y): (Double?, Double?) =
-            switch sort {
-            case .cpu: (a.cpu, b.cpu)
-            case .memory: (a.footprint.map(Double.init), b.footprint.map(Double.init))
-            }
-        if x != y {
-            guard let x else { return false }
-            guard let y else { return true }
-            return x > y
-        }
-        let fa = a.footprint ?? 0
-        let fb = b.footprint ?? 0
-        if fa != fb { return fa > fb }
-        return a.name.localizedStandardCompare(b.name) == .orderedAscending
-    }
 
     /// A cheap, unsanitized name used only to break ties.
     private static func sortName(of group: ProcessGroup) -> String {
@@ -175,15 +210,27 @@ final class TopAppsModel {
 
     // MARK: Rows
 
-    private func row(for group: ProcessGroup, sort: SortColumn) -> TopAppRowData {
+    private func row(for group: ProcessGroup, sort: SortColumn, frozen: Bool) -> TopAppRowData {
         let appName = group.appPath.map(appDisplayName(atPath:))
         let open = expandedGroupID == group.id && !group.helpers.isEmpty
         var helpers: [HelperRowData] = []
         var more = 0
         if open {
-            let heaviest = group.helpers.sorted { Self.precedes($0, $1, by: sort) }
-            helpers = heaviest.prefix(Self.helperLimit).map { helperRow(for: $0, appName: appName ?? "") }
-            more = max(0, group.helpers.count - Self.helperLimit)
+            // The helpers use the same rules and the same freeze as the rows above them.
+            let byID = Dictionary(
+                group.helpers.map { (Self.helperID(of: $0), $0) }, uniquingKeysWith: { first, _ in first })
+            let items = byID.map { id, sample in
+                RankItem(
+                    id: id, cpuPercent: sample.cpuPercent, footprintBytes: sample.footprintBytes,
+                    name: Self.executableName(of: sample))
+            }
+            let previous = previousHelpers?.group == group.id ? previousHelpers?.ids ?? [] : []
+            let ids = RankingEngine.next(
+                items, column: sort, cpuReady: true, previous: previous, frozen: frozen,
+                limit: Self.helperLimit)
+            helpers = ids.compactMap { byID[$0] }.map { helperRow(for: $0, appName: appName ?? "") }
+            more = max(0, group.helpers.count - ids.count)
+            previousHelpers = (group.id, ids)
         }
         return TopAppRowData(
             id: group.id,
@@ -197,13 +244,17 @@ final class TopAppsModel {
             moreCount: more)
     }
 
+    private static func helperID(of sample: ProcessSample) -> String {
+        "pid:\(sample.identity.pid):\(sample.identity.startMicros)"
+    }
+
     private func helperRow(for sample: ProcessSample, appName: String) -> HelperRowData {
         let raw = Self.executableName(of: sample)
         var name = ProcessText.sanitize(ProcessGrouping.helperName(executableName: raw, appName: appName))
         if name.isEmpty { name = "—" }
         let pid = Int(sample.identity.pid)
         return HelperRowData(
-            id: "pid:\(sample.identity.pid):\(sample.identity.startMicros)",
+            id: Self.helperID(of: sample),
             name: name,
             help: String(localized: "\(name) · PID \(pid)"),
             cpuPercent: sample.cpuPercent,

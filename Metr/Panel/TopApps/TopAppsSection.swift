@@ -14,6 +14,7 @@ struct TopAppsSection: View {
     /// The selected segment, remembered across openings (D-06). Stored as the column's raw value.
     @AppStorage("topAppsSort") private var sortRaw = SortColumn.cpu.rawValue
     @State private var model = TopAppsModel()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let text = MetricText(locale: .current)
 
@@ -30,6 +31,10 @@ struct TopAppsSection: View {
         .padding(.horizontal, 8)
         // An open group that left the list closes, so it cannot reopen by surprise (D-08).
         .onChange(of: display.rowIDs) { _, visible in model.collapse(unlessVisible: visible) }
+        // The watchdog runs after the update, never inside body: it may change the freeze state.
+        .onChange(of: store.processes.value?.sequence) { _, _ in model.runFreezeWatchdog() }
+        // The model dies with the popover; this also covers a window that closes with the pointer inside.
+        .onDisappear { model.setPointerInList(false) }
     }
 
     private var header: some View {
@@ -79,7 +84,33 @@ struct TopAppsSection: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: Self.rowHeight * 5, alignment: .top)
+        // Rows are keyed by their stable id, so a reorder moves them instead of fading (D-10). The
+        // animation sits on the rows container only, and Reduce Motion makes it instant.
+        .animation(reduceMotion ? nil : .smooth(duration: 0.35), value: display.rowIDs)
+        // While the pointer is over the rows nothing moves under it (D-10, T-02-23).
+        .onContinuousHover { phase in
+            switch phase {
+            case .active: model.setPointerInList(true)
+            case .ended: model.setPointerInList(false)
+            }
+        }
+        .background { frameReader }
         .padding(.bottom, 8)
+    }
+
+    /// The frame reader is an AppKit view, which `ImageRenderer` draws as a "prohibited" badge,
+    /// so the debug renderer gets a clear view instead. Compiled out of Release.
+    @ViewBuilder
+    private var frameReader: some View {
+        #if DEBUG
+        if DebugSnapshotRenderer.isRendering {
+            Color.clear
+        } else {
+            ScreenFrameReader { model.listScreenFrame = $0 }
+        }
+        #else
+        ScreenFrameReader { model.listScreenFrame = $0 }
+        #endif
     }
 }
 
@@ -97,8 +128,8 @@ private struct AppRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let cpu = data.cpuPercent.map { text.percent($0 / 100) } ?? "—"
-        let memory = data.footprintBytes.map { text.memoryBytes($0) } ?? "—"
+        let cpu = text.processCPU(data.cpuPercent)
+        let memory = text.processMemory(data.footprintBytes)
         let expandsLabel =
             data.isExpanded
             ? String(localized: "Collapse \(data.name)") : String(localized: "Expand \(data.name)")
@@ -207,8 +238,8 @@ private struct HelperRow: View {
     let text: MetricText
 
     var body: some View {
-        let cpu = data.cpuPercent.map { text.percent($0 / 100) } ?? "—"
-        let memory = data.footprintBytes.map { text.memoryBytes($0) } ?? "—"
+        let cpu = text.processCPU(data.cpuPercent)
+        let memory = text.processMemory(data.footprintBytes)
         HStack(spacing: 0) {
             Color.clear.frame(width: 44)
             Text(verbatim: data.name)
@@ -260,5 +291,44 @@ private struct MoreLine: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 20)
+    }
+}
+
+/// Reports its own frame in screen coordinates, so the freeze watchdog can tell whether the
+/// pointer is still over the list when the hover end was never delivered (RESEARCH Pitfall 10, A8).
+private struct ScreenFrameReader: NSViewRepresentable {
+    let onChange: (CGRect?) -> Void
+
+    func makeNSView(context: Context) -> ReaderView {
+        let view = ReaderView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ view: ReaderView, context: Context) {
+        view.onChange = onChange
+        view.report()
+    }
+
+    final class ReaderView: NSView {
+        var onChange: ((CGRect?) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            report()
+        }
+
+        override func layout() {
+            super.layout()
+            report()
+        }
+
+        func report() {
+            guard let window else {
+                onChange?(nil)
+                return
+            }
+            onChange?(window.convertToScreen(convert(bounds, to: nil)))
+        }
     }
 }

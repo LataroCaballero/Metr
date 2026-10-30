@@ -25,6 +25,21 @@ public struct MetricText: Sendable {
         Int64(clamping: bytes).formatted(.byteCount(style: .memory).locale(locale))
     }
 
+    /// A process row's CPU in Activity Monitor scale, percent of ONE core, so a process busy on
+    /// several cores reads above 100: "182%" in en, "182 %" in es. Above 0 and below 1 reads
+    /// "<1%" so a live process never looks idle; nil (pending) is the em dash (D-11, D-20).
+    public func processCPU(_ percentOfOneCore: Double?) -> String {
+        guard let value = percentOfOneCore else { return "\u{2014}" }
+        if value > 0, value < 1 { return "<" + percent(0.01) }
+        return percent(max(0, value) / 100)
+    }
+
+    /// A process row's memory in the memory byte style; nil (pending) is the em dash.
+    public func processMemory(_ bytes: UInt64?) -> String {
+        guard let bytes else { return "\u{2014}" }
+        return memoryBytes(bytes)
+    }
+
     /// Decimal (file) byte count with unit, matching Finder, e.g. "210 GB".
     public func diskBytes(_ bytes: Int64) -> String {
         bytes.formatted(.byteCount(style: .file).locale(locale))
