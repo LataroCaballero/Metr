@@ -10,6 +10,8 @@ import SwiftUI
 /// the popover (UI-SPEC Pitfall 8). No custom background: the glass comes from NSPopover.
 struct TopAppsSection: View {
     let store: MetricsStore
+    /// Esc asks this first, so it cancels an open Force Quit confirmation before the panel closes.
+    let escape: PanelEscapeRouter
 
     /// The selected segment, remembered across openings (D-06). Stored as the column's raw value.
     @AppStorage("topAppsSort") private var sortRaw = SortColumn.cpu.rawValue
@@ -33,6 +35,8 @@ struct TopAppsSection: View {
         .onChange(of: display.rowIDs) { _, visible in model.collapse(unlessVisible: visible) }
         // The watchdog runs after the update, never inside body: it may change the freeze state.
         .onChange(of: store.processes.value?.sequence) { _, _ in model.runFreezeWatchdog() }
+        // Esc steps back one level: an open confirmation first, the panel second (D-14, Pitfall 9).
+        .onAppear { escape.cancelConfirmation = { [weak model] in model?.cancelConfirmation() ?? false } }
         // The model dies with the popover; this also covers a window that closes with the pointer inside.
         .onDisappear { model.setPointerInList(false) }
     }
@@ -73,7 +77,12 @@ struct TopAppsSection: View {
                         cancelForceQuit: { model.cancelForceQuit(row.id) })
                     if row.isExpanded {
                         ForEach(row.helpers) { helper in
-                            HelperRow(data: helper, effectiveSort: display.effectiveSort, text: text)
+                            HelperRow(
+                                data: helper, appName: row.name, effectiveSort: display.effectiveSort,
+                                text: text,
+                                requestForceQuit: { model.requestForceQuit(helper.id) },
+                                confirmForceQuit: { model.confirmForceQuit(helper.id) },
+                                cancelForceQuit: { model.cancelForceQuit(helper.id) })
                         }
                         if row.moreCount > 0 { MoreLine(count: row.moreCount) }
                     }

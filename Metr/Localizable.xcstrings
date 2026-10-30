@@ -241,6 +241,54 @@
         }
       }
     },
+    "Force Quit Process…": {
+      "comment": "Context menu item of a helper row: force quits only that process, after a confirmation",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forzar salida del proceso…"
+          }
+        }
+      }
+    },
+    "Owned by another user": {
+      "comment": "Reason line in the context menu of a row that belongs to another user",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "De otro usuario"
+          }
+        }
+      }
+    },
+    "This is Metr": {
+      "comment": "Reason line in the context menu of Metr's own row",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta es Metr"
+          }
+        }
+      }
+    },
+    "Metr can't quit this": {
+      "comment": "Reason line in the context menu of a row the system will not let Metr signal",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metr no puede cerrarlo"
+          }
+        }
+      }
+    },
     "Quitting…": {
       "comment": "Shown in a Top Apps row after Quit was sent, until the app exits",
       "extractionState": "manual",

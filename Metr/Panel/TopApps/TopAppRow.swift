@@ -123,12 +123,18 @@ struct AppRow: View {
     }
 
     /// The context menu: system-drawn, text only, sized by its content (UI-SPEC "Context menus").
-    /// Quit and Force Quit are offered only while the row's availability is `.allowed`.
+    /// It is built from the same availability as the hover button. A disabled row keeps both items,
+    /// greyed out, and says why on a reason line, so nothing fails silently (PROC-07, D-17).
     @ViewBuilder
     private var menu: some View {
-        if canQuit {
-            Button("Quit \(data.name)") { quit() }
-            Button("Force Quit \(data.name)…", role: .destructive) { requestForceQuit() }
+        Button("Quit \(data.name)") { quit() }
+            .disabled(!canQuit)
+        Button("Force Quit \(data.name)…", role: .destructive) { requestForceQuit() }
+            .disabled(!canQuit)
+        if case .disabled(let reason) = data.availability {
+            Divider()
+            Button(reason.menuText) {}
+                .disabled(true)
         }
     }
 
@@ -243,12 +249,38 @@ struct AppRow: View {
 /// reserved and empty because helpers have no hover button (D-16, UI-SPEC "Helper row").
 struct HelperRow: View {
     let data: HelperRowData
+    /// The app the helper belongs to, for the confirmation wording (D-16).
+    let appName: String
     let effectiveSort: SortColumn
     let text: MetricText
+    let requestForceQuit: () -> Void
+    let confirmForceQuit: () -> Void
+    let cancelForceQuit: () -> Void
+
+    @State private var isOverOffer = false
+
+    private var isWorking: Bool {
+        if case .forceQuitting = data.actionState { return true }
+        return false
+    }
+    private var offersForceQuit: Bool { data.actionState == .didNotQuit && data.availability == .allowed }
 
     var body: some View {
+        if data.actionState == .confirming {
+            // The helper variant names the process and its app (D-16).
+            ConfirmationRow(
+                variant: .helper(name: data.name, app: appName), cancel: cancelForceQuit,
+                confirm: confirmForceQuit)
+        } else {
+            rowContent
+        }
+    }
+
+    @ViewBuilder
+    private var rowContent: some View {
         let cpu = text.processCPU(data.cpuPercent)
         let memory = text.processMemory(data.footprintBytes)
+        let didNotQuit = String(localized: "\(data.name) didn't quit. It may be waiting for you.")
         HStack(spacing: 0) {
             Color.clear.frame(width: 44)
             Text(verbatim: data.name)
@@ -258,20 +290,65 @@ struct HelperRow: View {
                 .truncationMode(.tail)
                 .frame(minWidth: 112, maxWidth: .infinity, alignment: .leading)
             Color.clear.frame(width: 8)
-            number(cpu, active: effectiveSort == .cpu)
-                .minimumScaleFactor(0.85)
-                .frame(width: 44, alignment: .trailing)
-            Color.clear.frame(width: 4)
-            number(memory, active: effectiveSort == .memory)
-                .frame(width: 52, alignment: .trailing)
+            if isWorking {
+                Text("Quitting…")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.secondary)
+                    .lineLimit(1)
+                    .frame(width: 100, alignment: .trailing)
+            } else if offersForceQuit {
+                Button(action: requestForceQuit) {
+                    Text("Force Quit…")
+                        .font(.subheadline)
+                        .foregroundStyle(isOverOffer ? Color.primary : Color.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .frame(width: 100, alignment: .trailing)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { isOverOffer = $0 }
+                .help(didNotQuit)
+            } else {
+                number(cpu, active: effectiveSort == .cpu)
+                    .minimumScaleFactor(0.85)
+                    .frame(width: 44, alignment: .trailing)
+                Color.clear.frame(width: 4)
+                number(memory, active: effectiveSort == .memory)
+                    .frame(width: 52, alignment: .trailing)
+            }
             Color.clear.frame(width: 4)
             Color.clear.frame(width: 20)
         }
+        .opacity(isWorking ? 0.5 : 1)
         .padding(.horizontal, 8)
         .frame(height: 24)
         .help(data.help)
+        .contextMenu { menu }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(String(localized: "\(data.name), CPU \(cpu), memory \(memory)"))
+        .accessibilityLabel(
+            isWorking
+                ? data.name + ", " + String(localized: "Quitting…")
+                : String(localized: "\(data.name), CPU \(cpu), memory \(memory)")
+        )
+        .accessibilityActions {
+            if data.availability == .allowed, !isWorking {
+                Button(String(localized: "Force Quit Process…")) { requestForceQuit() }
+            }
+        }
+    }
+
+    /// A helper has no graceful Quit: its only item is "Force Quit Process…" (D-16). A disabled
+    /// helper shows it greyed out with the reason (D-17).
+    @ViewBuilder
+    private var menu: some View {
+        Button("Force Quit Process…", role: .destructive) { requestForceQuit() }
+            .disabled(data.availability != .allowed || isWorking)
+        if case .disabled(let reason) = data.availability {
+            Divider()
+            Button(reason.menuText) {}
+                .disabled(true)
+        }
     }
 
     private func number(_ value: String, active: Bool) -> some View {
@@ -300,5 +377,17 @@ struct MoreLine: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 20)
+    }
+}
+
+extension DisabledReason {
+    /// The reason line of a disabled row's context menu (PROC-07, D-17).
+    var menuText: String {
+        switch self {
+        case .systemProcess: String(localized: "System process")
+        case .otherUser: String(localized: "Owned by another user")
+        case .thisIsMetr: String(localized: "This is Metr")
+        case .cannotSignal: String(localized: "Metr can't quit this")
+        }
     }
 }

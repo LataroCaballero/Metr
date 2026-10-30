@@ -3,12 +3,29 @@ import MetrCore
 import MetrRender
 import SwiftUI
 
+/// Decides what Esc does while the panel is open (D-14, RESEARCH Pitfall 9). The Top Apps section
+/// hands it a closure that cancels an open Force Quit confirmation; Esc closes the panel only when
+/// there was nothing to cancel. One router per presentation of the panel.
+@MainActor
+final class PanelEscapeRouter {
+    /// Cancels the open confirmation and returns true, or returns false when none is open.
+    var cancelConfirmation: (() -> Bool)?
+
+    /// True when Esc was used up by a confirmation, so the panel must stay open.
+    func handleEscape() -> Bool {
+        cancelConfirmation?() ?? false
+    }
+}
+
 /// Popover content (D-08): three rings with exact numbers, a divider and the Quit footer (D-09).
 /// No custom background, material or glass: the Liquid Glass comes from NSPopover (CLAUDE.md).
 struct PanelView: View {
     let store: MetricsStore
     /// Closes the panel. Called on Esc (`onExitCommand`); the default keeps `PanelView(store:)` compiling.
     var onClose: () -> Void = {}
+    /// Esc priority: an open confirmation is cancelled before the panel closes. A fresh router by
+    /// default, so `PanelView(store:)` keeps compiling.
+    var escape = PanelEscapeRouter()
 
     /// True while the other-users half of the process list cannot be read (E5 partial): the panel
     /// says so instead of silently showing an incomplete list. Clears on the next successful read.
@@ -23,7 +40,7 @@ struct PanelView: View {
             Divider()
             StatusLine(store: store)
             Divider()
-            TopAppsSection(store: store)
+            TopAppsSection(store: store, escape: escape)
             Divider()
             HStack {
                 // The leading side holds the partial-state line; Phase 3 adds "Open Window" here.
@@ -56,7 +73,7 @@ struct PanelView: View {
             .padding(.vertical, 16)
         }
         .frame(width: 320)
-        .onExitCommand { onClose() }
+        .onExitCommand { if !escape.handleEscape() { onClose() } }
     }
 }
 

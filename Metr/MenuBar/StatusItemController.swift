@@ -199,11 +199,15 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
     /// the first 300 s idle measurement, FND-03). So the content exists only while the panel is shown.
     private func makePanelContent() -> PanelHostingController {
         let close: () -> Void = { [weak self] in self?.popover.performClose(nil) }
-        let hosting = PanelHostingController(rootView: PanelView(store: store, onClose: close))
+        // One router per presentation: it dies with the panel content, so nothing stays half-confirmed.
+        let escape = PanelEscapeRouter()
+        let hosting = PanelHostingController(
+            rootView: PanelView(store: store, onClose: close, escape: escape))
         hosting.sizingOptions = .preferredContentSize
-        // Esc closes the panel by two paths: the responder chain (cancelOperation) and the
-        // SwiftUI exit command inside the view.
-        hosting.onCancel = close
+        // Esc reaches the panel by two paths: the responder chain (cancelOperation) and the
+        // SwiftUI exit command inside the view. Both cancel an open confirmation first and close
+        // the panel only when there was none (D-14, RESEARCH Pitfall 9).
+        hosting.onCancel = { if !escape.handleEscape() { close() } }
         return hosting
     }
 
