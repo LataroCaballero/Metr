@@ -42,7 +42,9 @@ guard CommandLine.arguments.count >= 2 else {
 let appPath = CommandLine.arguments[1]
 
 let before = layer25WindowCount()
-let launch = run("/usr/bin/open", ["-g", "-n", appPath])
+// The welcome override keeps the welcome window away and stops the first-launch flag from
+// being written into the owner's preferences domain.
+let launch = run("/usr/bin/open", ["-g", "-n", appPath, "--args", "-MetrDidPresentWelcome", "YES"])
 guard launch.status == 0 else {
     print("FAIL: open exited \(launch.status): \(launch.out)")
     exit(1)

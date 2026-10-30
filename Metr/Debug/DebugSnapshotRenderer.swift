@@ -15,28 +15,48 @@ enum DebugSnapshotRenderer {
         var thermal: ThermalLevel = .normal
     }
 
+    private static let totalMemory: UInt64 = 17_179_869_184
+
+    /// One fixture per column or status-line state worth looking at (PANEL-01/02/03/05, CPU-02).
     private static var fixtures: [Fixture] {
         [
+            // Quiet Mac: no swap, normal thermal state.
             Fixture(
                 name: "idle",
                 batch: MetricsBatch(
-                    cpu: .value(CPUReading(total: 0.12)),
+                    cpu: .value(
+                        CPUReading(
+                            total: 0.12, user: 0.08, system: 0.04,
+                            clusters: [
+                                CPUCluster(name: "Performance", usage: 0.10),
+                                CPUCluster(name: "Efficiency", usage: 0.14),
+                            ])),
                     memory: .value(
                         MemoryReading(
-                            usedBytes: 12_025_908_428, totalBytes: 17_179_869_184,
+                            usedBytes: 12_025_908_428, totalBytes: totalMemory,
                             swapUsedBytes: 0, freePercent: 60, pressure: .normal)),
                     disk: .value(DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)),
                     elapsed: 1)),
+            // Worst case for width: 3-digit percents, Critical sentence, swap, 7 of 245 GB free.
+            // The system share carries the whole 100 % so the longest "System 100 %" row is on screen.
             Fixture(
                 name: "stress",
                 batch: MetricsBatch(
-                    cpu: .value(CPUReading(total: 1.0)),
+                    cpu: .value(
+                        CPUReading(
+                            total: 1.0, user: 0, system: 1.0,
+                            clusters: [
+                                CPUCluster(name: "Performance", usage: 1.0),
+                                CPUCluster(name: "Efficiency", usage: 1.0),
+                            ])),
                     memory: .value(
                         MemoryReading(
-                            usedBytes: 16_500_000_000, totalBytes: 17_179_869_184,
-                            swapUsedBytes: 4_000_000_000, freePercent: 3, pressure: .critical)),
+                            usedBytes: 16_500_000_000, totalBytes: totalMemory,
+                            swapUsedBytes: 4_294_967_296, freePercent: 3, pressure: .critical)),
                     disk: .value(DiskReading(totalBytes: 245_000_000_000, availableBytes: 7_000_000_000)),
-                    elapsed: 1)),
+                    elapsed: 1),
+                thermal: .critical),
+            // Elevated everywhere: memory warn with swap, disk under 10 % free, thermal Elevated.
             Fixture(
                 name: "elevated",
                 batch: MetricsBatch(
@@ -49,11 +69,40 @@ enum DebugSnapshotRenderer {
                             ])),
                     memory: .value(
                         MemoryReading(
-                            usedBytes: 13_500_000_000, totalBytes: 17_179_869_184,
+                            usedBytes: 13_500_000_000, totalBytes: totalMemory,
                             swapUsedBytes: 1_288_490_189, freePercent: 12, pressure: .warn)),
                     disk: .value(DiskReading(totalBytes: 494_000_000_000, availableBytes: 39_500_000_000)),
                     elapsed: 1),
                 thermal: .elevated),
+            // Three core tiers, in the order the reader reports them (Super, Performance, Efficiency).
+            Fixture(
+                name: "threetier",
+                batch: MetricsBatch(
+                    cpu: .value(
+                        CPUReading(
+                            total: 0.30, user: 0.20, system: 0.10,
+                            clusters: [
+                                CPUCluster(name: "Super", usage: 0.50),
+                                CPUCluster(name: "Performance", usage: 0.30),
+                                CPUCluster(name: "Efficiency", usage: 0.10),
+                            ])),
+                    memory: .value(
+                        MemoryReading(
+                            usedBytes: 9_000_000_000, totalBytes: totalMemory,
+                            swapUsedBytes: 0, freePercent: 45, pressure: .normal)),
+                    disk: .value(DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)),
+                    elapsed: 1)),
+            // First sample not in yet: CPU shows the em dash and track-only bars named by the system.
+            Fixture(
+                name: "pending",
+                batch: MetricsBatch(
+                    cpu: .pending,
+                    memory: .value(
+                        MemoryReading(
+                            usedBytes: 12_025_908_428, totalBytes: totalMemory,
+                            swapUsedBytes: 0, freePercent: 60, pressure: .normal)),
+                    disk: .value(DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)),
+                    elapsed: 1)),
             Fixture(
                 name: "unavailable",
                 batch: MetricsBatch(cpu: .unavailable, memory: .unavailable, disk: .unavailable, elapsed: 1)),

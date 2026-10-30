@@ -249,10 +249,15 @@ private struct StatusLine: View {
         let sentence = store.memory.value.map { Self.sentence($0.pressure) }
         let word = Self.thermalWord(store.thermal)
         let text = Self.line(sentence: sentence, thermal: store.thermal)
-        // The invisible copy reserves two lines; the visible copy sits centered over it, so a
-        // one-line message is vertically centered in the reserved space (UI-SPEC "Status line").
-        return text
-            .lineLimit(2, reservesSpace: true)
+        // An invisible block of two real lines reserves the height and the visible copy sits centered
+        // over it, so a one-line message is vertically centered (UI-SPEC "Status line"). Two real
+        // lines, not `lineLimit(2, reservesSpace: true)`: that reserve is 1 pt shorter than two
+        // wrapped lines, so a Critical sentence either resized the panel or lost its second line (E4).
+        return VStack(spacing: 0) {
+            Text(verbatim: "\u{00A0}")
+            Text(verbatim: "\u{00A0}")
+        }
+            .frame(maxWidth: .infinity)
             .opacity(0)
             .overlay { text.lineLimit(2) }
             .font(.subheadline)
@@ -318,13 +323,26 @@ private struct KeyValueRow: View {
     let value: String?
 
     var body: some View {
-        HStack(spacing: 4) {
-            Text(verbatim: label)
-                .foregroundStyle(Color.secondary)
-            Spacer(minLength: 4)
-            Text(verbatim: value ?? "—")
-                .foregroundStyle(Color.primary)
-                .monospacedDigit()
+        // 'Sistema 100 %' is wider than 80 pt at full size, so there are two forms. The full-size row
+        // is used whenever it fits (every EN row and most ES rows). Only when it does not, the number
+        // keeps its size (it is the figure being read) and the label scales to the UI-SPEC floor
+        // (0.85), with the gap tightened from 8 to 4 pt, before anything is cut.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) {
+                Text(verbatim: label).foregroundStyle(Color.secondary)
+                Spacer(minLength: 4)
+                Text(verbatim: value ?? "—").foregroundStyle(Color.primary).monospacedDigit()
+            }
+            HStack(spacing: 2) {
+                Text(verbatim: label)
+                    .foregroundStyle(Color.secondary)
+                    .minimumScaleFactor(0.85)
+                Spacer(minLength: 2)
+                Text(verbatim: value ?? "—")
+                    .foregroundStyle(Color.primary)
+                    .monospacedDigit()
+                    .layoutPriority(1)
+            }
         }
         .font(.subheadline)
         .lineLimit(1)
