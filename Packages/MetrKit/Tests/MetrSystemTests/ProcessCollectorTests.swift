@@ -445,4 +445,29 @@ private final class FakeTop: TopSnapshotSource, Sendable {
         collector.reset()
         #expect(top.stops == 1)
     }
+
+    @Test func failedSourceRetriesAfterTenSeconds() throws {
+        let (fake, top) = fixture()
+        fake.set([fake.entry(10)])
+        fake.setUsage(10, cpuSeconds: 1)
+        let collector = ProcessCollector(sources: fake.sources, top: top)
+        _ = collector.sample()
+        #expect(top.starts == 1)
+
+        top.set(state: .failed, block: nil)  // the child died
+        fake.advance(seconds: 5)
+        let early = try #require(collector.sample().value)
+        #expect(top.starts == 1, "a failing top must not be respawned every tick")
+        #expect(early.otherUsers == .unavailable)
+        #expect(early.processes.map(\.identity.pid) == [10], "own rows keep ranking")
+
+        fake.advance(seconds: 5.1)  // 10.1 s since the start attempt
+        _ = collector.sample()
+        #expect(top.starts == 2)
+
+        top.set(state: .failed, block: nil)
+        fake.advance(seconds: 9)
+        _ = collector.sample()
+        #expect(top.starts == 2, "the 10 s runs from the latest start attempt")
+    }
 }

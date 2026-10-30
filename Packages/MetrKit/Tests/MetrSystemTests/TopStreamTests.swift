@@ -138,4 +138,89 @@ private func eventually(
         stream.stop()
         #expect(terminated.count == 1, "stop() must terminate the child exactly once")
     }
+
+    // MARK: Task 2: hostile or changed output
+
+    @Test func junkAndCommaRowsAreRejected() {
+        var parser = TopBlockParser(startedAtMicros: 0)
+        var blocks: [TopBlock] = []
+        let rows = ["10 1,5 4M", "11 0.0 4M extra", "12 0.0 6M", "13 2.0 7M"]
+        for line in canned(total: 4, rows: rows) {
+            if let block = parser.feed(line, atMicros: 100) { blocks.append(block) }
+        }
+        #expect(blocks.count == 1)
+        guard blocks.count == 1 else { return }
+        #expect(Set(blocks[0].rows.keys) == [12, 13])
+        #expect(parser.rejectedRows == 2)
+    }
+
+    @Test func overlongLinesAreDropped() {
+        var parser = TopBlockParser(startedAtMicros: 0)
+        var blocks: [TopBlock] = []
+        // A well-formed row padded to 600 bytes: only the length cap can reject it.
+        let overlong = "10 0.0 4M" + String(repeating: " ", count: 591)
+        #expect(overlong.utf8.count == 600)
+        for line in canned(total: 2, rows: [overlong, "11 0.0 5M"]) {
+            if let block = parser.feed(line, atMicros: 100) { blocks.append(block) }
+        }
+        #expect(blocks.count == 1)
+        guard blocks.count == 1 else { return }
+        #expect(Set(blocks[0].rows.keys) == [11])
+        #expect(parser.rejectedRows == 1)
+    }
+
+    @Test func eofWithoutStopFails() async throws {
+        let pipe = Pipe()
+        let launcher = TopLauncher(launch: {
+            TopChild(pid: 4243, output: pipe.fileHandleForReading, terminate: {})
+        })
+        let stream = TopStream(launcher: launcher)
+        stream.start()
+        try pipe.fileHandleForWriting.write(
+            contentsOf: Data((canned(total: 1, rows: ["10 0.0 4M"]).joined(separator: "\n") + "\n").utf8))
+        #expect(await eventually { stream.state == .running })
+        try pipe.fileHandleForWriting.close()
+        #expect(await eventually { stream.state == .failed })
+        #expect(stream.latest() == nil, "a dead stream must not keep serving its last block")
+        stream.stop()
+        #expect(stream.state == .stopped)
+    }
+
+    @Test func twoUnderParsedBlocksFail() async throws {
+        let pipe = Pipe()
+        let terminated = Counter()
+        let launcher = TopLauncher(launch: {
+            TopChild(pid: 4244, output: pipe.fileHandleForReading, terminate: { terminated.increment() })
+        })
+        let stream = TopStream(launcher: launcher)
+        stream.start()
+        // Ten processes announced, two rows parsed, twice: a format change (RESEARCH A2).
+        var text = ""
+        for _ in 0..<2 {
+            text += canned(total: 10, rows: ["10 0.0 4M", "11 0.0 5M"]).joined(separator: "\n") + "\n"
+        }
+        text += "Processes: 10 total, 1 running\n"  // completes the second block
+        try pipe.fileHandleForWriting.write(contentsOf: Data(text.utf8))
+        #expect(await eventually { stream.state == .failed })
+        #expect(terminated.count == 1)
+        #expect(stream.latest() == nil)
+        stream.stop()
+        #expect(terminated.count == 1, "the child was already ended when the stream failed")
+    }
+
+    /// The real tool: a block with the whole process table arrives, and stop() really ends the child.
+    @Test func realTopStartsAndStops() async throws {
+        let stream = TopStream()
+        stream.start()
+        #expect(await eventually(timeout: .seconds(5)) { (stream.latest()?.rows.count ?? 0) >= 50 })
+        let block = stream.latest()
+        #expect(block?.rows[1] != nil, "launchd (pid 1) must be in the block")
+        let pid = try #require(stream.childPID)
+        stream.stop()
+        #expect(stream.state == .stopped)
+        #expect(stream.latest() == nil)
+        // The specific child is gone (other suites may run their own top: never count all of them).
+        // A live setuid-root child answers EPERM; a gone one answers ESRCH.
+        #expect(await eventually(timeout: .seconds(1)) { kill(pid, 0) != 0 && errno == ESRCH })
+    }
 }
