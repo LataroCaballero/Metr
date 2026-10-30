@@ -13,7 +13,7 @@
 #
 # Prints
 #   PANEL-COST metr_cpu=<v> top_cpu=<v> total=<v> warmup=<s>
-#   NO-ORPHAN OK            (Metr is quit and its top child is gone within 3 s)
+#   NO-ORPHAN (followed by OK; Metr is quit and its top child is gone within 3 s)
 # or "FAIL: <reason>" with exit 1. Every number is validated as a plain number (fail closed).
 # Fails when the warm-up is above 3.0 s or either log line is missing.
 set -euo pipefail
@@ -93,3 +93,12 @@ metr_is_number "$WARMUP" || fail "FAIL: warm-up is not a plain number ($WARMUP)"
 
 echo "PANEL-COST metr_cpu=$METR_CPU top_cpu=$TOP_CPU total=$TOTAL warmup=$WARMUP"
 [ "$(metr_gt "$WARMUP" "$WARMUP_MAX")" = "0" ] || fail "FAIL: warm-up ${WARMUP}s is above ${WARMUP_MAX}s"
+
+# Quit Metr: its top child must go with it (the read end of top's stdout dies with Metr, and the
+# last-cancel / suspend paths stop it before that).
+metr_kill
+for _ in $(seq 1 30); do
+  kill -0 "$TOP_PID" 2>/dev/null || { echo "NO-ORPHAN OK"; exit 0; }
+  sleep 0.1
+done
+fail "FAIL: orphaned top (pid $TOP_PID still running 3 s after Metr exited)"

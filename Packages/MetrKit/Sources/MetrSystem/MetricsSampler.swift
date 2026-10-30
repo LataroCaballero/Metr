@@ -108,6 +108,12 @@ public final class MetricsSampler: @unchecked Sendable {
         queue.async {
             self.diagnostics?("suspend reason=\(reason.rawValue)")
             self.scheduler.suspend(reason: reason)
+            // No top child survives sleep or display-off (T-02-21). The reset is queued behind the
+            // scheduler's own suspend, so no process sample can restart the child in between: a
+            // tick or early delivery queued earlier runs first and is stopped by this reset, and
+            // one queued later finds the scheduler suspended and does nothing. Resume re-primes
+            // through onBaseline, and the next process sample starts a fresh child.
+            self.queue.async { self.processes.reset() }
         }
     }
 
@@ -123,6 +129,12 @@ public final class MetricsSampler: @unchecked Sendable {
 
     public func setConstrained(_ value: Bool) {
         scheduler.setConstrained(value)
+    }
+
+    /// The pid of the top child behind the process list, nil when none runs. Read on the sampler
+    /// queue; used only by the lifecycle tests through `@testable import`.
+    func topChildPID() -> Int32? {
+        queue.sync { topStream.childPID }
     }
 
     // MARK: Diagnostics (POSIX formatting)

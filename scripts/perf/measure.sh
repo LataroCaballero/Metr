@@ -6,6 +6,8 @@
 # --record writes the measured values into budget.env (MEASURED_*), also when the gate fails.
 # Prints "NO-SOCKETS OK" and "BUDGET PASS cpu=<v> wakeups=<v> footprint=<v>", or
 # "SOCKETS FOUND" / "BUDGET FAIL <metric>=<v> max=<v>" with exit 1.
+# Also asserts the idle app has no top child (RESEARCH Pitfall 3): prints the no-top-child line,
+# or "TOP CHILD FOUND" with exit 1.
 # Fails closed (WR-03): "FAIL: could not parse rusage output: <line>" with exit 1 when cpu_pct,
 # wakeups_per_s or footprint_mb is not a plain number; nothing is recorded or compared then.
 set -euo pipefail
@@ -48,6 +50,12 @@ echo "MEASURING pid=$PID app=$METR_APP_RELEASE"
 RUSAGE_BIN="$(metr_rusage_bin)"
 LINE="$("$RUSAGE_BIN" "$PID" "$SECS")" || fail "FAIL: proc_pid_rusage failed for pid $PID"
 echo "$LINE"
+
+# The process list's top child exists only while the panel or window is open (PROC-01, T-02-21).
+if pgrep -P "$PID" -x top >/dev/null 2>&1; then
+  fail "TOP CHILD FOUND"
+fi
+echo "NO-TOP-CHILD OK"
 
 CPU="$(printf '%s\n' "$LINE" | sed -E 's/.*cpu_pct=([0-9.]+).*/\1/')"
 WAKE="$(printf '%s\n' "$LINE" | sed -E 's/.*wakeups_per_s=([0-9.]+).*/\1/')"
