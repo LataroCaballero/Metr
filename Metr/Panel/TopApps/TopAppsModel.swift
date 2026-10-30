@@ -39,6 +39,8 @@ struct TopAppRowData: Identifiable, Equatable {
     let helpers: [HelperRowData]
     /// Helpers beyond the three shown; above zero draws the "and N more…" line.
     let moreCount: Int
+    /// Whether the hover Quit is offered: only `.allowed` shows it, a disabled row shows nothing (PROC-07, D-17).
+    let availability: ActionAvailability
 
     var isExpanded: Bool { helperCount > 0 && !helpers.isEmpty }
 }
@@ -96,6 +98,11 @@ final class TopAppsModel {
     /// The last built display and what it was built from, so a re-render does no ranking work.
     @ObservationIgnored private var memo: (key: MemoKey, display: TopAppsDisplay)?
     @ObservationIgnored private var lastSort: SortColumn?
+
+    /// What each visible row stands for, by row id, for the actions (D-16).
+    @ObservationIgnored private var roles: [String: RowRole] = [:]
+    @ObservationIgnored private let guardian = ActionGuard.system()
+    @ObservationIgnored private let coordinator = QuitCoordinator()
 
     private struct MemoKey: Equatable {
         var sequence: UInt64
@@ -169,6 +176,7 @@ final class TopAppsModel {
             let ids = RankingEngine.next(
                 items, column: sort, cpuReady: snapshot.cpuReady, previous: previousApps, frozen: frozen,
                 limit: Self.rowLimit)
+            roles.removeAll(keepingCapacity: true)
             let rows = ids.compactMap { byID[$0] }.map { row(for: $0, sort: effective, frozen: frozen) }
             let display = TopAppsDisplay(content: .rows(rows), effectiveSort: effective)
 
@@ -212,6 +220,8 @@ final class TopAppsModel {
 
     private func row(for group: ProcessGroup, sort: SortColumn, frozen: Bool) -> TopAppRowData {
         let appName = group.appPath.map(appDisplayName(atPath:))
+        let (role, availability) = actionInfo(for: group)
+        roles[group.id] = role
         let open = expandedGroupID == group.id && !group.helpers.isEmpty
         var helpers: [HelperRowData] = []
         var more = 0
@@ -241,7 +251,25 @@ final class TopAppsModel {
             kind: ProcessClassifier.kind(of: group, selfPID: getpid(), selfUID: getuid()),
             helperCount: group.helpers.count,
             helpers: helpers,
-            moreCount: more)
+            moreCount: more,
+            availability: availability)
+    }
+
+    /// The role and availability of a row, from its main member only. An app group with no main
+    /// process running has no role and offers nothing; a root-owned bundle is view-only (Q5).
+    private func actionInfo(for group: ProcessGroup) -> (role: RowRole?, availability: ActionAvailability) {
+        guard let main = group.main else { return (nil, .disabled(.cannotSignal)) }
+        let role: RowRole =
+            group.appPath.map { .app(appPath: $0, main: main.identity, mainPath: main.path) }
+            ?? .standalone(identity: main.identity, path: main.path)
+        return (role, guardian.availability(pid: main.identity.pid, uid: main.uid, path: main.path))
+    }
+
+    /// Quit from the row: the route for the row's role, executed behind the guard. A refusal is a
+    /// silent no-op; the row simply leaves on the next reading (PROC-05, PROC-07).
+    func quit(_ rowID: String) {
+        guard let role = roles[rowID], let route = ActionRoutes.route(for: role, op: .quit) else { return }
+        _ = coordinator.execute(route)
     }
 
     private static func helperID(of sample: ProcessSample) -> String {

@@ -121,6 +121,18 @@
         }
       }
     },
+    "Quit %@": {
+      "comment": "Hover button help and VoiceOver label on a Top Apps row: quits that app, e.g. Quit Calculator",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salir de %@"
+          }
+        }
+      }
+    },
     "Quit Metr": {
       "comment": "Panel footer button that quits the app",
       "extractionState": "manual",
