@@ -106,7 +106,64 @@ enum DebugSnapshotRenderer {
             Fixture(
                 name: "unavailable",
                 batch: MetricsBatch(cpu: .unavailable, memory: .unavailable, disk: .unavailable, elapsed: 1)),
+            // The Top Apps list with a multi-process browser, system apps and a busy tool
+            // (PANEL-04, PROC-02, PROC-03). Synthetic values; the Chrome members sum to 182 % and 2.1 GB.
+            Fixture(
+                name: "apps",
+                batch: MetricsBatch(
+                    cpu: .value(
+                        CPUReading(
+                            total: 0.34, user: 0.22, system: 0.12,
+                            clusters: [
+                                CPUCluster(name: "Performance", usage: 0.41),
+                                CPUCluster(name: "Efficiency", usage: 0.18),
+                            ])),
+                    memory: .value(
+                        MemoryReading(
+                            usedBytes: 12_025_908_428, totalBytes: totalMemory,
+                            swapUsedBytes: 0, freePercent: 60, pressure: .normal)),
+                    disk: .value(DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)),
+                    processes: .value(appsSnapshot),
+                    elapsed: 1)),
         ]
+    }
+
+    /// Synthetic own-uid processes for the `apps` fixture: Chrome with its helpers, three system
+    /// apps, a compiler and Xcode.
+    private static var appsSnapshot: ProcessSnapshot {
+        let me = getuid()
+        let mib: UInt64 = 1_048_576
+        var next: Int32 = 1_000
+        var samples: [ProcessSample] = []
+        func add(_ path: String, _ command: String, cpu: Double, mib size: UInt64) {
+            next += 1
+            samples.append(
+                ProcessSample(
+                    identity: ProcessIdentity(pid: next, startMicros: Int64(next) * 1_000),
+                    ppid: 1, uid: me, path: path, command: command,
+                    cpuPercent: cpu, footprintBytes: size * mib))
+        }
+        let chrome = "/Applications/Google Chrome.app"
+        let helpers = chrome + "/Contents/Frameworks/Google Chrome Framework.framework/Versions/1/Helpers"
+        func helper(_ kind: String?) -> String {
+            let name = "Google Chrome Helper" + (kind.map { " (\($0))" } ?? "")
+            return helpers + "/" + name + ".app/Contents/MacOS/" + name
+        }
+        add(chrome + "/Contents/MacOS/Google Chrome", "Google Chrome", cpu: 14, mib: 300)
+        let renderers: [(Double, UInt64)] = [
+            (42, 310), (24, 220), (18, 170), (13, 140), (10, 110), (8, 100), (6, 90), (5, 70), (3, 60), (2, 50),
+        ]
+        for (cpu, size) in renderers { add(helper("Renderer"), "Google Chrome H", cpu: cpu, mib: size) }
+        add(helper("GPU"), "Google Chrome H", cpu: 24, mib: 400)
+        for (cpu, size) in [(6.0, UInt64(60)), (4, 45), (3, 35)] {
+            add(helper(nil), "Google Chrome H", cpu: cpu, mib: size)
+        }
+        add("/System/Applications/Mail.app/Contents/MacOS/Mail", "Mail", cpu: 4, mib: 520)
+        add("/System/Applications/Music.app/Contents/MacOS/Music", "Music", cpu: 3, mib: 380)
+        add("/Applications/Safari.app/Contents/MacOS/Safari", "Safari", cpu: 9, mib: 610)
+        add("/usr/bin/swift-frontend", "swift-frontend", cpu: 140, mib: 1_400)
+        add("/Applications/Xcode.app/Contents/MacOS/Xcode", "Xcode", cpu: 22, mib: 2_400)
+        return ProcessSnapshot(sequence: 1, processes: samples, cpuReady: true)
     }
 
     static func renderAndExit(to directory: URL) {

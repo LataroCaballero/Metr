@@ -636,6 +636,54 @@
           }
         }
       }
+    },
+    "Top Apps": {
+      "comment": "Header of the list of the apps using the most CPU or memory",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mayor uso"
+          }
+        }
+      }
+    },
+    "Sort top apps by": {
+      "comment": "Accessibility label of the CPU | Memory segmented control above the app list",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ordenar por"
+          }
+        }
+      }
+    },
+    "App list unavailable.": {
+      "comment": "Quiet line shown instead of the app list when the process list cannot be read",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lista de apps no disponible."
+          }
+        }
+      }
+    },
+    "%@, CPU %@, memory %@": {
+      "comment": "VoiceOver reading of one app row: name, CPU percent, memory size",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, CPU %@, memoria %@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

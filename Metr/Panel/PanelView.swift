@@ -17,6 +17,8 @@ struct PanelView: View {
             Divider()
             StatusLine(store: store)
             Divider()
+            TopAppsSection(store: store)
+            Divider()
             HStack {
                 // The leading side stays empty; Phase 3 adds "Open Window" here.
                 #if DEBUG
