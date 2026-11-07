@@ -45,6 +45,29 @@ public struct MetricText: Sendable {
         bytes.formatted(.byteCount(style: .file).locale(locale))
     }
 
-    /// STUB for the RED step.
-    public func rate(_ bytesPerSecond: Double?) -> String { "" }
+    /// A network rate in decimal bytes per second with the system formatter's own units, as
+    /// Finder writes them: "2.1 MB/s" in en, "2,1 MB/s" in es, "kB/s" with a lowercase k (RESEARCH
+    /// Pitfall 14; owner decision of 2026-11-02, Open Question 3 resolved). A rate that rounds to
+    /// zero reads "0 kB/s": the formatter itself would say "Zero kB" in English, which is never
+    /// shown. nil (pending) is the em dash. "/s" is unit notation, identical in EN and ES.
+    public func rate(_ bytesPerSecond: Double?) -> String {
+        guard let value = bytesPerSecond, value.isFinite else { return "\u{2014}" }
+        let bytes = Int64(min(max(0, value), 9e18).rounded())
+        guard bytes > 0 else { return zeroRate() }
+        return bytes.formatted(rateStyle.locale(locale)) + "/s"
+    }
+
+    private var rateStyle: ByteCountFormatStyle {
+        .byteCount(style: .file, allowedUnits: [.kb, .mb, .gb])
+    }
+
+    /// "0 kB" built from how the formatter writes one kilobyte, so the digit, the separator and the
+    /// kilobyte symbol all come from the system in the pinned locale.
+    private func zeroRate() -> String {
+        let one = Int64(1000).formatted(
+            ByteCountFormatStyle(style: .file, allowedUnits: [.kb]).locale(locale))
+        let digitOne = 1.formatted(.number.locale(locale))
+        let digitZero = 0.formatted(.number.locale(locale))
+        return one.replacingOccurrences(of: digitOne, with: digitZero) + "/s"
+    }
 }

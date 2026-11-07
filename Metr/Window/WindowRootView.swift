@@ -87,8 +87,16 @@ struct WindowRootView: View {
             // Nothing while pending or unreadable: never a fake 0 (D-04, D-20).
             guard let gpu = store.gpu.value else { return nil }
             return text.percent(gpu.utilization)
-        case .network, .processes:
-            // Network gets its value with its own plan; Processes never has one.
+        case .network:
+            // The download rate alone (D-04), in the system's units. "—" until the second sample;
+            // nothing when the counters cannot be read: never a fake 0.
+            switch store.network {
+            case .value(let reading): return "\u{2193}" + text.rate(reading.downBytesPerSec)
+            case .pending: return "—"
+            case .unavailable: return nil
+            }
+        case .processes:
+            // Processes never has a sidebar value.
             return nil
         }
     }
