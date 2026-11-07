@@ -16,6 +16,9 @@ public struct MetricsBatch: Sendable, Equatable {
     public var cpu: Reading<CPUReading>?
     public var memory: Reading<MemoryReading>?
     public var disk: Reading<DiskReading>?
+    /// The aggregate network rate over physical interfaces (NET-01). Window-only: present while the
+    /// window is open, and `.pending` once when the window closes, so a reopened window starts from nothing.
+    public var network: Reading<NetworkReading>?
     /// The user's processes (D-20). Present only while the panel or window is open, and
     /// `.pending` once on the last close so a later open never shows stale numbers.
     public var processes: Reading<ProcessSnapshot>?
@@ -28,6 +31,7 @@ public struct MetricsBatch: Sendable, Equatable {
         cpu: Reading<CPUReading>? = nil,
         memory: Reading<MemoryReading>? = nil,
         disk: Reading<DiskReading>? = nil,
+        network: Reading<NetworkReading>? = nil,
         processes: Reading<ProcessSnapshot>? = nil,
         gpu: Reading<GPUReading>? = nil,
         elapsed: Double
@@ -35,6 +39,7 @@ public struct MetricsBatch: Sendable, Equatable {
         self.cpu = cpu
         self.memory = memory
         self.disk = disk
+        self.network = network
         self.processes = processes
         self.gpu = gpu
         self.elapsed = elapsed

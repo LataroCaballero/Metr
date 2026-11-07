@@ -1,7 +1,8 @@
 /// A metric the sampler can collect on its own cadence. `processes` is last, so the log order
-/// stays cpu,memory,disk,gpu,processes. `processes` exists only while the panel is open or the
-/// window shows Processes (D-05, D-20). `gpu` is window-only (D-05): it is sampled while the window
-/// is open, whatever section it shows, so its chart keeps filling, and never otherwise.
+/// stays cpu,memory,disk,network,gpu,processes. `processes` exists only while the panel is open or the
+/// window shows Processes (D-05, D-20). `network` and `gpu` are window-only (D-05, D-06): they are
+/// sampled while the window is open, whatever section it shows, so their charts keep filling, and
+/// never otherwise.
 public enum Metric: String, Sendable, Hashable, CaseIterable {
     case cpu, memory, disk, network, gpu, processes
 }
@@ -48,6 +49,7 @@ public struct SamplingPlan: Sendable, Equatable {
     public static let windowCPUMemory = 1.0
     public static let windowDisk = 10.0
     public static let windowGPU = 1.0
+    public static let windowNetwork = 1.0
     /// The roadmap's "2 s or slower" for the process list; absent from the idle tier (D-20).
     public static let panelProcesses = 2.0
     public static let windowProcesses = 2.0
@@ -82,7 +84,10 @@ public struct SamplingPlan: Sendable, Equatable {
         }
         let k = (constrained ? 2.0 : 1.0) * scale
         var cadence: [Metric: Double] = [.cpu: fast * k, .memory: fast * k, .disk: disk * k]
-        if tier == .window { cadence[.gpu] = windowGPU * k }
+        if tier == .window {
+            cadence[.network] = windowNetwork * k
+            cadence[.gpu] = windowGPU * k
+        }
         if let processes { cadence[.processes] = processes * k }
         return SamplingPlan(
             tier: tier,

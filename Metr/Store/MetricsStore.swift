@@ -13,6 +13,10 @@ final class MetricsStore {
     /// The user's processes, sampled only while the panel or window is open (D-20). `.pending`
     /// until the first reading and again after the last close.
     private(set) var processes: Reading<ProcessSnapshot> = .pending
+    /// The aggregate network rate over physical interfaces (NET-01), sampled only while the window is
+    /// open. `.pending` until the second sample and again after the window closes, so a reopened
+    /// window never shows a stale rate.
+    private(set) var network: Reading<NetworkReading> = .pending
     /// The GPU (GPU-01), sampled only while the window is open. `.pending` until the first reading
     /// and again after the window closes, so a reopened window never shows a stale value.
     private(set) var gpu: Reading<GPUReading> = .pending
@@ -89,6 +93,7 @@ final class MetricsStore {
         clearHistory()
         // Window-only readings do not outlive the window (D-06).
         gpu = .pending
+        network = .pending
         windowSessionActive = false
         windowSessionStart = nil
         DebugHooks.log("history cleared")
@@ -124,6 +129,16 @@ final class MetricsStore {
         if let reading = batch.disk {
             disk = reading
         }
+        if let reading = batch.network {
+            // A baseline-only sample after a wake or a rebase is .pending: keep the last real
+            // rate until the next one arrives, like CPU. The window closing resets it explicitly.
+            if reading == .pending, network.value != nil {
+                // keep
+            } else {
+                network = reading
+            }
+            DebugHooks.log(Self.describe(network: reading))
+        }
         if let reading = batch.processes {
             processes = reading
             DebugHooks.log(Self.describe(processes: reading))
@@ -154,6 +169,18 @@ final class MetricsStore {
         guard windowSessionActive else { return }
         let pair = reading.value.map { SeriesPair(first: $0.user, second: $0.system) }
         cpuHistory.append(time: time, value: pair)
+    }
+
+    /// Byte counts and a flag only, never an interface or service name: `net down=1200 up=300 primary=0`
+    /// or the pending / unavailable word. DEBUG log only (T-03-15).
+    private static func describe(network reading: Reading<NetworkReading>) -> String {
+        switch reading {
+        case .pending: return "net pending"
+        case .unavailable: return "net unavailable"
+        case .value(let value):
+            return "net down=\(Int64(value.downBytesPerSec.rounded())) up=\(Int64(value.upBytesPerSec.rounded()))"
+                + " primary=\(value.hasPrimary ? 1 : 0)"
+        }
     }
 
     /// Numbers only: `gpu util=0.45 cores=8`, or the pending / unavailable word. DEBUG log only (T-03-11).

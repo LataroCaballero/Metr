@@ -7,13 +7,14 @@ import MetrCore
 /// values to a `@Sendable` sink.
 public final class MetricsSampler: @unchecked Sendable {
     /// Metrics this build has collectors for.
-    private static let supported: Set<Metric> = [.cpu, .memory, .disk, .gpu, .processes]
+    private static let supported: Set<Metric> = [.cpu, .memory, .disk, .network, .gpu, .processes]
 
     private let queue = DispatchQueue(label: "Metr.sampler", qos: .utility)
     private let scheduler: SamplingScheduler
     private let cpu = CPUCollector()  // confined to `queue`
     private let memory = MemoryCollector()  // confined to `queue`
     private let disk = DiskCollector()  // confined to `queue`
+    private let network = NetworkCollector()  // confined to `queue`; reads the kernel's counters only while the window is open
     private let gpu = GPUCollector()  // confined to `queue`; touches IOKit only while the window is open
     private let processes: ProcessCollector  // confined to `queue`
     /// The one top child behind the process list. Started by the collector on the first process
@@ -41,6 +42,7 @@ public final class MetricsSampler: @unchecked Sendable {
             self.diagnostics = diagnostics
             self.emit = onBatch
             self.cpu.resetBaseline()
+            self.network.resetBaseline()
             self.scheduler.onPlanChange = { plan in
                 diagnostics?(Self.describe(plan))
             }
@@ -67,14 +69,17 @@ public final class MetricsSampler: @unchecked Sendable {
                 if sampled.contains(.cpu) { batch.cpu = cpu.sample() }
                 if sampled.contains(.memory) { batch.memory = memory.sample() }
                 if sampled.contains(.disk) { batch.disk = disk.sample() }
+                if sampled.contains(.network) { batch.network = network.sample() }
                 if sampled.contains(.gpu) { batch.gpu = gpu.sample() }
                 if sampled.contains(.processes) { batch.processes = processes.sample() }
                 onBatch(batch)
             },
             onBaseline: { [self] in
                 // Runs on `queue`, right before the scheduler's all-metrics baseline tick: a
-                // delta must never span a suspension.
+                // delta must never span a suspension. Every delta baseline resets here, which is
+                // how a real wake re-takes the network baseline (CLAUDE.md "Wake/sleep").
                 cpu.resetBaseline()
+                network.resetBaseline()
                 processes.reset()
             })
     }
@@ -105,8 +110,10 @@ public final class MetricsSampler: @unchecked Sendable {
                 }
                 if SamplingPlan.carriesWindow(before) && !SamplingPlan.carriesWindow(self.registry.active) {
                     // Window-only metrics are never left stale: the window tier ended, so the store
-                    // gets a pending GPU reading and a reopened window starts from nothing.
-                    self.emit?(MetricsBatch(gpu: .pending, elapsed: 0))
+                    // gets pending GPU and network readings and a reopened window starts from nothing.
+                    // The network baseline goes too, so the first rate after a reopen is measured afresh.
+                    self.network.resetBaseline()
+                    self.emit?(MetricsBatch(network: .pending, gpu: .pending, elapsed: 0))
                 }
                 self.scheduler.setDemand(self.registry.active)
             }
@@ -126,9 +133,10 @@ public final class MetricsSampler: @unchecked Sendable {
         }
     }
 
-    /// The scheduler resets the CPU baseline through `onBaseline` only when it actually
-    /// re-primes (it takes a fresh baseline tick, then primes). A resume with no matching
-    /// suspend, or one made while another reason still holds, keeps the last baseline (WR-04).
+    /// The scheduler resets the CPU and network baselines through `onBaseline` only when it actually
+    /// re-primes (it takes a fresh baseline tick, then primes). So a real wake never lets a rate
+    /// span the sleep, and a resume with no matching suspend, or one made while another reason
+    /// still holds, keeps the last baseline because no time was suspended (WR-04).
     public func resume(reason: SuspendReason) {
         queue.async {
             self.diagnostics?("resume reason=\(reason.rawValue)")
