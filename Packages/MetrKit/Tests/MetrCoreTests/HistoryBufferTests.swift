@@ -176,4 +176,25 @@ import Testing
         #expect(ChartSummary.make([nil, nil]) == nil)
         #expect(ChartSummary.make([]) == nil)
     }
+
+    // MARK: Rate axis
+
+    @Test func rateAxisRoundsUp() {
+        #expect(RateAxis.ceiling(peak: 0, floor: 100_000) == 100_000)
+        #expect(RateAxis.ceiling(peak: 120_000, floor: 100_000) == 200_000)
+        #expect(RateAxis.ceiling(peak: 1_400_000, floor: 100_000) == 2_000_000)
+        #expect(RateAxis.ceiling(peak: 3_000_000, floor: 100_000) == 5_000_000)
+        #expect(RateAxis.ceiling(peak: 7_000_000, floor: 100_000) == 10_000_000)
+        // A peak exactly on a step stays on it.
+        #expect(RateAxis.ceiling(peak: 2_000_000, floor: 100_000) == 2_000_000)
+        // The floor wins over a smaller peak, and rounds up like any other value.
+        #expect(RateAxis.ceiling(peak: 500_000, floor: 1_000_000) == 1_000_000)
+    }
+
+    @Test func rateAxisIgnoresNonsense() {
+        // A NaN or infinite peak is no peak: the floor stays, so a bad sample never blows up the scale.
+        #expect(RateAxis.ceiling(peak: .nan, floor: 100_000) == 100_000)
+        #expect(RateAxis.ceiling(peak: .infinity, floor: 100_000) == 100_000)
+        #expect(RateAxis.ceiling(peak: -5, floor: 100_000) == 100_000)
+    }
 }

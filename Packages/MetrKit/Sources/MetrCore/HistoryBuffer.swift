@@ -219,3 +219,11 @@ public struct ChartSummary: Sendable, Equatable {
         return ChartSummary(now: latest, lowest: lowest, highest: highest, average: sum / Double(count))
     }
 }
+
+/// The symmetric Y scale of a rate chart (Network, and Disk read / write): see `ceiling`.
+public enum RateAxis {
+    /// The largest rate the chart's axis shows on each side of zero.
+    public static func ceiling(peak: Double, floor: Double) -> Double {
+        floor
+    }
+}
