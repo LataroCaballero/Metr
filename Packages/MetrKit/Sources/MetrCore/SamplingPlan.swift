@@ -2,7 +2,7 @@
 /// stays cpu,memory,disk,processes. It exists only while the panel is open or the window shows
 /// Processes (D-05, D-20); the window's other sections sample only cpu, memory and disk.
 public enum Metric: String, Sendable, Hashable, CaseIterable {
-    case cpu, memory, disk, processes
+    case cpu, memory, disk, gpu, processes
 }
 
 /// Who is asking for faster sampling. Only the popover delegate registers `.panel`, and it

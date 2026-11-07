@@ -22,16 +22,16 @@ import Testing
         let plan = SamplingPlan.make(demand: [.window], suspended: false, constrained: false)
         #expect(plan.tier == .window)
         #expect(plan.baseInterval == 1)
-        #expect(plan.cadence == [.cpu: 1, .memory: 1, .disk: 10])
+        #expect(plan.cadence == [.cpu: 1, .memory: 1, .disk: 10, .gpu: 1])
 
         let withProcesses = SamplingPlan.make(demand: [.window, .windowProcesses], suspended: false, constrained: false)
         #expect(withProcesses.tier == .window)
         #expect(withProcesses.baseInterval == 1)
-        #expect(withProcesses.cadence == [.cpu: 1, .memory: 1, .disk: 10, .processes: 2])
+        #expect(withProcesses.cadence == [.cpu: 1, .memory: 1, .disk: 10, .gpu: 1, .processes: 2])
 
         let processesAlone = SamplingPlan.make(demand: [.windowProcesses], suspended: false, constrained: false)
         #expect(processesAlone.tier == .window)
-        #expect(processesAlone.cadence == [.cpu: 1, .memory: 1, .disk: 10, .processes: 2])
+        #expect(processesAlone.cadence == [.cpu: 1, .memory: 1, .disk: 10, .gpu: 1, .processes: 2])
     }
 
     @Test func processesOnlyInPanelAndWindowTiers() {
