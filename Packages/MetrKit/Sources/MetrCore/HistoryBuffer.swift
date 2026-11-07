@@ -76,8 +76,7 @@ public struct MemoryHistoryValue: Sendable, Equatable {
     }
 
     public init(_ reading: MemoryReading) {
-        // RED stub: compiles, behaves wrongly until the GREEN commit.
-        self.init(fill: 0, pressure: .normal)
+        self.init(fill: reading.ringFill, pressure: reading.pressure)
     }
 }
 

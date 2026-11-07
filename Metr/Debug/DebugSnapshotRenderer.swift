@@ -348,6 +348,17 @@ enum DebugSnapshotRenderer {
         let contentSize: NSSize
         /// What the GPU reading looks like in this fixture.
         var gpu: GPUFixtureState = .none
+        /// What the memory history looks like in this fixture.
+        var memory: MemoryFixtureState = .lastOnly
+    }
+
+    private enum MemoryFixtureState {
+        /// One memory reading, in the last second (the other sections' fixtures).
+        case lastOnly
+        /// Five minutes at Normal pressure with swap in use.
+        case steady
+        /// Five minutes that go Normal, Elevated, Critical and back to Normal.
+        case pressure
     }
 
     private enum GPUFixtureState {
@@ -369,7 +380,34 @@ enum DebugSnapshotRenderer {
             WindowFixture(name: "gpu", section: .gpu, populated: true, contentSize: standard, gpu: .live),
             WindowFixture(
                 name: "gpu-unavailable", section: .gpu, populated: false, contentSize: standard, gpu: .unavailable),
+            WindowFixture(name: "memory", section: .memory, populated: true, contentSize: standard, memory: .steady),
+            WindowFixture(
+                name: "memory-pressure", section: .memory, populated: true, contentSize: standard, memory: .pressure),
         ]
+    }
+
+    /// The memory reading of second `second` of a memory fixture: Normal with swap, or the pressure
+    /// story (Normal, then Elevated, then Critical, then Normal again).
+    private static func memoryReading(second: Int, state: MemoryFixtureState) -> MemoryReading {
+        let t = Double(second)
+        switch state {
+        case .lastOnly, .steady:
+            let free = Int((58 + 6 * sin(t / 30) + 2 * sin(t / 7)).rounded())
+            return MemoryReading(
+                usedBytes: 12_025_908_428, totalBytes: totalMemory, swapUsedBytes: 1_288_490_189, freePercent: free,
+                pressure: .normal)
+        case .pressure:
+            let (free, pressure): (Double, MemoryPressure) =
+                switch second {
+                case ..<90: (55 + 5 * sin(t / 20), .normal)
+                case 90..<160: (28 - 4 * sin(t / 9), .warn)
+                case 160..<220: (9 - 3 * sin(t / 6), .critical)
+                default: (48 + 4 * sin(t / 15), .normal)
+                }
+            return MemoryReading(
+                usedBytes: 14_500_000_000, totalBytes: totalMemory, swapUsedBytes: 2_147_483_648,
+                freePercent: Int(free.rounded()), pressure: pressure)
+        }
     }
 
     /// A store holding a fixture's own history: a window session that began 300 s ago and one
@@ -406,8 +444,13 @@ enum DebugSnapshotRenderer {
             let gpu: Reading<GPUReading>? =
                 fixture.gpu == .live
                 ? .value(GPUReading(utilization: second < 5 ? 0 : load, chipName: "Apple M4", coreCount: 8)) : nil
+            // The memory fixtures feed one reading a second; the others only the last one.
+            let memoryBatch: Reading<MemoryReading>? =
+                fixture.memory == .lastOnly
+                ? (second == 299 ? .value(memory) : nil)
+                : .value(memoryReading(second: second, state: fixture.memory))
             let batch = MetricsBatch(
-                cpu: .value(reading), memory: second == 299 ? .value(memory) : nil,
+                cpu: .value(reading), memory: memoryBatch,
                 disk: second == 299 ? .value(disk) : nil, gpu: gpu, elapsed: 1)
             store.apply(batch, at: now - 299 + t)
         }
@@ -473,6 +516,7 @@ enum DebugSnapshotRenderer {
         switch section {
         case .cpu: CPUSectionView(store: store)
         case .gpu: GPUSectionView(store: store)
+        case .memory: MemorySectionView(store: store)
         default: Color.clear
         }
     }

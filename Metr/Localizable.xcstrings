@@ -1446,6 +1446,42 @@
           }
         }
       }
+    },
+    "Memory pressure": {
+      "comment": "Label over the pressure word in the window's Memory section",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Presión de memoria"
+          }
+        }
+      }
+    },
+    "Memory used": {
+      "comment": "Row of the window's Memory section, e.g. 11.2 of 16 GB",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memoria usada"
+          }
+        }
+      }
+    },
+    "Swap used": {
+      "comment": "Row of the window's Memory section, shown only while swap is in use",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Swap usado"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

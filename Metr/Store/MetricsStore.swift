@@ -30,6 +30,9 @@ final class MetricsStore {
     private(set) var cpuHistory = HistoryBuffer<SeriesPair>()
     /// The GPU history of the open window: utilization 0...1, a nil value is a gap.
     private(set) var gpuHistory = HistoryBuffer<Double>()
+    /// The memory history of the open window: the ring's fill and the pressure level that tints it.
+    /// A nil value is a gap.
+    private(set) var memoryHistory = HistoryBuffer<MemoryHistoryValue>()
 
     /// The system's core tiers (`hw.perflevelN`, perflevel 0 first) with their core counts, read once.
     /// Empty when the layout cannot be read. They name the cluster bars, in the panel and in the
@@ -94,6 +97,7 @@ final class MetricsStore {
     private func clearHistory() {
         cpuHistory.removeAll()
         gpuHistory.removeAll()
+        memoryHistory.removeAll()
     }
 
     func apply(_ batch: MetricsBatch, at time: Double = Date.now.timeIntervalSinceReferenceDate) {
@@ -111,6 +115,11 @@ final class MetricsStore {
         }
         if let reading = batch.memory {
             memory = reading
+            if windowSessionActive {
+                // The same signal as the ring (D-08); a pending or failed read is a gap.
+                memoryHistory.append(time: time, value: reading.value.map(MemoryHistoryValue.init))
+                recorded = true
+            }
         }
         if let reading = batch.disk {
             disk = reading
@@ -129,9 +138,10 @@ final class MetricsStore {
             }
         }
         if recorded, windowSessionActive {
-            // Counts only (T-03-07). mem is filled in by the memory section (03-05).
+            // Counts only (T-03-07).
             DebugHooks.log(
-                "history cpu=\(cpuHistory.samples.count) mem=0 gpu=\(gpuHistory.samples.count)")
+                "history cpu=\(cpuHistory.samples.count) mem=\(memoryHistory.samples.count)"
+                    + " gpu=\(gpuHistory.samples.count)")
         }
         diskTint = TintLogic.disk(freeFraction: disk.value?.freeFraction, previous: diskTint)
         didApply?()
