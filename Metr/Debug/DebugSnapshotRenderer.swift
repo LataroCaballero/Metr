@@ -350,6 +350,8 @@ enum DebugSnapshotRenderer {
         var gpu: GPUFixtureState = .none
         /// What the memory history looks like in this fixture.
         var memory: MemoryFixtureState = .lastOnly
+        /// What the network history looks like in this fixture.
+        var network: NetworkFixtureState = .none
         /// A preset hover position, in seconds before the newest sample: the readout is drawn as if
         /// the pointer rested there. nil = no pointer.
         var hoverSecondsAgo: Double?
@@ -362,6 +364,13 @@ enum DebugSnapshotRenderer {
         case steady
         /// Five minutes that go Normal, Elevated, Critical and back to Normal.
         case pressure
+    }
+
+    private enum NetworkFixtureState {
+        /// No network reading is fed.
+        case none
+        /// Five minutes of mirrored traffic: a download with bursts and a lighter upload.
+        case live
     }
 
     private enum GPUFixtureState {
@@ -388,6 +397,7 @@ enum DebugSnapshotRenderer {
             WindowFixture(name: "memory", section: .memory, populated: true, contentSize: standard, memory: .steady),
             WindowFixture(
                 name: "memory-pressure", section: .memory, populated: true, contentSize: standard, memory: .pressure),
+            WindowFixture(name: "network", section: .network, populated: true, contentSize: standard, network: .live),
         ]
     }
 
@@ -413,6 +423,17 @@ enum DebugSnapshotRenderer {
                 usedBytes: 14_500_000_000, totalBytes: totalMemory, swapUsedBytes: 2_147_483_648,
                 freePercent: Int(free.rounded()), pressure: pressure)
         }
+    }
+
+    /// The network reading of second `second` of a network fixture: a download with bursts and a quiet
+    /// stretch, and an upload a fraction of it, ending on 2.1 MB/s down and 120 kB/s up.
+    private static func networkReading(second: Int) -> NetworkReading {
+        let t = Double(second)
+        let burst = max(0, sin(t / 22)) * 3_800_000 + max(0, sin(t / 6.5)) * 900_000
+        let down = second == 299 ? 2_100_000 : 150_000 + burst
+        let up = second == 299 ? 120_000 : 40_000 + 0.18 * burst * (1 + sin(t / 9)) / 2
+        return NetworkReading(
+            downBytesPerSec: down, upBytesPerSec: up, downBytes: UInt64(down), upBytes: UInt64(up))
     }
 
     /// A store holding a fixture's own history: a window session that began 300 s ago and one
@@ -454,9 +475,11 @@ enum DebugSnapshotRenderer {
                 fixture.memory == .lastOnly
                 ? (second == 299 ? .value(memory) : nil)
                 : .value(memoryReading(second: second, state: fixture.memory))
+            let network: Reading<NetworkReading>? =
+                fixture.network == .none ? nil : .value(networkReading(second: second))
             let batch = MetricsBatch(
                 cpu: .value(reading), memory: memoryBatch,
-                disk: second == 299 ? .value(disk) : nil, gpu: gpu, elapsed: 1)
+                disk: second == 299 ? .value(disk) : nil, network: network, gpu: gpu, elapsed: 1)
             store.apply(batch, at: now - 299 + t)
         }
         return store
@@ -526,6 +549,7 @@ enum DebugSnapshotRenderer {
         case .cpu: CPUSectionView(store: store)
         case .gpu: GPUSectionView(store: store)
         case .memory: MemorySectionView(store: store)
+        case .network: NetworkSectionView(store: store)
         default: Color.clear
         }
     }

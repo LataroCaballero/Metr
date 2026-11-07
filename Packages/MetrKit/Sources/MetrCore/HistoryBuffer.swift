@@ -220,10 +220,23 @@ public struct ChartSummary: Sendable, Equatable {
     }
 }
 
-/// The symmetric Y scale of a rate chart (Network, and Disk read / write): see `ceiling`.
+/// The symmetric Y scale of a rate chart (Network, and Disk read / write).
 public enum RateAxis {
-    /// The largest rate the chart's axis shows on each side of zero.
+    /// The largest rate the chart's axis shows on each side of zero: the smallest 1, 2 or 5 times a
+    /// power of ten at or above the larger of `peak` and `floor`. The steps keep the tick labels round
+    /// ("2 MB/s", not "1.7 MB/s"), and the floor stops idle noise from filling the plot. A peak that
+    /// is not a finite number is no peak.
     public static func ceiling(peak: Double, floor: Double) -> Double {
-        floor
+        // A floor that cannot anchor a scale falls back to one byte per second.
+        let base = floor.isFinite && floor > 0 ? floor : 1
+        let target = peak.isFinite ? max(peak, base) : base
+        var decade = 1.0
+        // Decades from below: a loop, so no logarithm rounding can put a step on the wrong side.
+        while decade * 10 <= target { decade *= 10 }
+        while decade > target { decade /= 10 }
+        for step in [1.0, 2.0, 5.0, 10.0] where decade * step >= target {
+            return decade * step
+        }
+        return decade * 10
     }
 }

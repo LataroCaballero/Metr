@@ -122,8 +122,10 @@ struct WindowRootView: View {
             GPUSectionView(store: store)
         case .memory:
             MemorySectionView(store: store)
-        case .disk, .network:
-            // Later plans of this phase fill these sections. Until then the column stays empty.
+        case .network:
+            NetworkSectionView(store: store)
+        case .disk:
+            // A later plan of this phase fills this section. Until then the column stays empty.
             Color.clear
         }
     }

@@ -1518,6 +1518,30 @@
           }
         }
       }
+    },
+    "Download": {
+      "comment": "Network section label and chart legend for the data received",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descarga"
+          }
+        }
+      }
+    },
+    "Upload": {
+      "comment": "Network section label and chart legend for the data sent",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Subida"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
