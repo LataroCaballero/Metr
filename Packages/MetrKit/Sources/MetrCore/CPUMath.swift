@@ -19,10 +19,13 @@ public struct CPUCluster: Sendable, Equatable {
     public var name: String
     /// Average busy fraction of the cluster's cores, 0...1.
     public var usage: Double
+    /// STUB for the RED commit: never filled yet.
+    public var coreUsage: [Double]
 
-    public init(name: String, usage: Double) {
+    public init(name: String, usage: Double, coreUsage: [Double] = []) {
         self.name = name
         self.usage = usage
+        self.coreUsage = coreUsage
     }
 }
 

@@ -185,4 +185,56 @@ import Testing
         #expect(reading.clusters.isEmpty)
         #expect(reading.total > 0)
     }
+
+    // MARK: Per-core usage (WIN-03, D-09)
+
+    /// The M4 shape: Performance (4) and Efficiency (6), host indices 0-5 Efficiency and 6-9 Performance.
+    private var m4Layout: CoreLayout {
+        CoreLayout(levels: [
+            CoreLevel(name: "Performance", logicalCPUs: 4),
+            CoreLevel(name: "Efficiency", logicalCPUs: 6),
+        ])
+    }
+
+    @Test func perCoreUsageFollowsTheLayout() throws {
+        let previous = Array(repeating: CPUTicks(user: 0, system: 0, idle: 0, nice: 0), count: 10)
+        // Host core i is busy (i + 1) / 10 of a 100-tick delta.
+        var current: [CPUTicks] = []
+        for i in 0..<10 {
+            let busy = UInt32(10 * (i + 1))
+            current.append(CPUTicks(user: busy - 2, system: 2, idle: 100 - busy, nice: 0))
+        }
+        let reading = try #require(CPUMath.usage(previous: previous, current: current, layout: m4Layout))
+        try #require(reading.clusters.count == 2)
+        let performance = reading.clusters[0]
+        let efficiency = reading.clusters[1]
+        #expect(performance.name == "Performance")
+        #expect(performance.coreUsage.count == 4)
+        for (offset, usage) in performance.coreUsage.enumerated() {
+            #expect(abs(usage - Double(7 + offset) / 10) < 1e-9)  // host indices 6-9, in order
+        }
+        #expect(efficiency.coreUsage.count == 6)
+        for (offset, usage) in efficiency.coreUsage.enumerated() {
+            #expect(abs(usage - Double(1 + offset) / 10) < 1e-9)  // host indices 0-5, in order
+        }
+    }
+
+    @Test func coreWithNoTicksEmptiesItsCluster() throws {
+        let previous = Array(repeating: CPUTicks(user: 0, system: 0, idle: 0, nice: 0), count: 10)
+        var current = Array(repeating: CPUTicks(user: 50, system: 0, idle: 50, nice: 0), count: 10)
+        current[7] = previous[7]  // a Performance core that did not advance at all
+        let reading = try #require(CPUMath.usage(previous: previous, current: current, layout: m4Layout))
+        try #require(reading.clusters.count == 2)
+        // The cluster average still comes from the sums; the per-core list is not fabricated.
+        #expect(reading.clusters[0].coreUsage.isEmpty)
+        #expect(abs(reading.clusters[0].usage - 0.5) < 1e-9)
+        #expect(reading.clusters[1].coreUsage.count == 6)
+    }
+
+    @Test func noLayoutNoClusters() throws {
+        let previous = Array(repeating: CPUTicks(user: 0, system: 0, idle: 0, nice: 0), count: 4)
+        let current = Array(repeating: CPUTicks(user: 10, system: 0, idle: 10, nice: 0), count: 4)
+        let reading = try #require(CPUMath.usage(previous: previous, current: current, layout: nil))
+        #expect(reading.clusters.isEmpty)
+    }
 }
