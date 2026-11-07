@@ -1134,6 +1134,30 @@
           }
         }
       }
+    },
+    "5 min ago": {
+      "comment": "Left end label of a window history chart: the chart shows the last five minutes",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hace 5 min"
+          }
+        }
+      }
+    },
+    "Now": {
+      "comment": "Right end label of a window history chart: the newest sample",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ahora"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

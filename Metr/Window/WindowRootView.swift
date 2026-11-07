@@ -95,7 +95,7 @@ struct WindowRootView: View {
     private var detail: some View {
         switch model.section {
         case .cpu:
-            CPUHeroView(store: store)
+            CPUSectionView(store: store)
         case .processes:
             #if DEBUG
             if DebugHooks.chromeProbeEnabled {
@@ -132,45 +132,6 @@ private struct SidebarRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-    }
-}
-
-/// The CPU detail for now: the live whole-Mac total as the hero value. Plan 03-03 replaces it with
-/// the full CPU section (history chart, per-core bars).
-///
-/// The value does not animate: a `.numericText()` transition on a value that changes every second
-/// kept the window at about 14 % of a core in the Debug build (window-cost.sh cpu, 45 wakeups/s)
-/// against about 1 % without it. Plan 03-03 measures before it animates anything in the window.
-private struct CPUHeroView: View {
-    let store: MetricsStore
-
-    private let text = MetricText(locale: .current)
-
-    var body: some View {
-        let total = store.cpu.value.map { text.percent($0.total) }
-        var failed = false
-        if case .unavailable = store.cpu { failed = true }
-        return Form {
-            Section {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("CPU")
-                        .font(.subheadline)
-                        .foregroundStyle(Color.secondary)
-                    Text(verbatim: total ?? "—")
-                        .font(.title)
-                        .fontWeight(.semibold)
-                        .monospacedDigit()
-                    if failed {
-                        Text("Unavailable")
-                            .font(.subheadline)
-                            .foregroundStyle(Color.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityElement(children: .combine)
-            }
-        }
-        .formStyle(.grouped)
     }
 }
 

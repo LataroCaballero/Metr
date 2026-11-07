@@ -16,6 +16,16 @@ final class MetricsStore {
     /// Disk tint with its 1-point hysteresis (D-03). One state shared by the glyph and the panel.
     private(set) var diskTint: RingTint = .none
 
+    /// True from `beginWindowSession` to `endWindowSession`: the window is open. History is
+    /// recorded only while it is true (D-06); nothing is recorded, and nothing is on disk, otherwise.
+    private(set) var windowSessionActive = false
+    /// When the current window session began, on the same clock as the samples. The chart's empty
+    /// axes end here until the first sample arrives.
+    private(set) var windowSessionStart: Double?
+    /// The CPU history of the open window: first = user, second = system, both on the whole-Mac
+    /// scale. One stored property per series, so `@Observable` invalidates per chart.
+    private(set) var cpuHistory = HistoryBuffer<SeriesPair>()
+
     /// The system's names for the core tiers (`hw.perflevelN.name`, perflevel 0 first), read once.
     /// Empty when the layout cannot be read. They name the cluster bars while CPU is not yet sampled.
     let coreLevelNames: [String] = CPUCollector.readLayout()?.levels.map(\.name) ?? []
@@ -55,7 +65,26 @@ final class MetricsStore {
     /// Called after every applied batch. Not observed; the status item redraws from it.
     @ObservationIgnored var didApply: (() -> Void)?
 
-    func apply(_ batch: MetricsBatch) {
+    /// Starts a window session: every buffer is empty and recording begins (D-06).
+    func beginWindowSession(at time: Double = Date.now.timeIntervalSinceReferenceDate) {
+        clearHistory()
+        windowSessionActive = true
+        windowSessionStart = time
+    }
+
+    /// Ends the session when the window closes: recording stops and every buffer is discarded.
+    func endWindowSession() {
+        clearHistory()
+        windowSessionActive = false
+        windowSessionStart = nil
+        DebugHooks.log("history cleared")
+    }
+
+    private func clearHistory() {
+        cpuHistory.removeAll()
+    }
+
+    func apply(_ batch: MetricsBatch, at time: Double = Date.now.timeIntervalSinceReferenceDate) {
         if let reading = batch.cpu {
             // A baseline-only sample after launch or wake is .pending: keep the last real
             // value until the primed one arrives, so the ring never flashes to a track.
@@ -64,6 +93,7 @@ final class MetricsStore {
             } else {
                 cpu = reading
             }
+            recordCPUHistory(reading, at: time)
         }
         if let reading = batch.memory {
             memory = reading
@@ -79,6 +109,15 @@ final class MetricsStore {
         diskTint = TintLogic.disk(freeFraction: disk.value?.freeFraction, previous: diskTint)
         didApply?()
         DebugHooks.log(Self.describe(cpu: cpu, memory: memory, disk: disk, thermal: thermal))
+    }
+
+    /// Appends one CPU sample while the window is open. A pending or failed read is a gap, never a
+    /// zero, and nothing is back-filled after a wake. DEBUG log: the count only (T-03-07).
+    private func recordCPUHistory(_ reading: Reading<CPUReading>, at time: Double) {
+        guard windowSessionActive else { return }
+        let pair = reading.value.map { SeriesPair(first: $0.user, second: $0.system) }
+        cpuHistory.append(time: time, value: pair)
+        DebugHooks.log("history cpu=\(cpuHistory.samples.count)")
     }
 
     /// Counts and a ready flag only: never a process name, path or command line (T-02-08).

@@ -53,6 +53,9 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     /// panel built is not thrown away. When the route lands on Processes the process pass is
     /// registered in the same step, so the panel's top child carries straight over.
     func show(_ route: WindowRoute) {
+        // History starts empty on every open and exists only while the window does (D-06). It begins
+        // before the demand is registered, so the first sample after the open is the first one kept.
+        if !model.isOpen { store.beginWindowSession() }
         isShown = true
         model.section = resolve(route)
         applyDemand()
@@ -159,6 +162,7 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         isShown = false
         applyDemand()
+        store.endWindowSession()
         // A hosting controller left on a closed window keeps observing the store (FND-03).
         window?.contentViewController = nil
         model.setOpen(false)
