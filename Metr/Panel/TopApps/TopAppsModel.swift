@@ -1,7 +1,6 @@
 import AppKit
 import MetrCore
 import Observation
-import UniformTypeIdentifiers
 
 /// What the Top Apps area shows (D-20, E5).
 struct TopAppsDisplay: Equatable {
@@ -74,17 +73,14 @@ final class TopAppsModel {
     static let rowLimit = 5
     /// Helpers listed under an open group (D-08).
     static let helperLimit = 3
-    /// Bound of the name and icon caches. On overflow they are dropped whole (T-02-12).
-    static let cacheLimit = 64
-
     /// The group that is open, if any. Opening one closes the other (D-08).
     private(set) var expandedGroupID: String?
 
     /// Groups of the newest reading, computed once per snapshot sequence on the MainActor
     /// (about 600 paths, a few ms every 2 s, only while the panel is open).
     @ObservationIgnored private var grouped: (sequence: UInt64, groups: [ProcessGroup])?
-    @ObservationIgnored private var nameCache: [String: String] = [:]
-    @ObservationIgnored private var iconCache: [String: NSImage] = [:]
+    /// Names and icons, shared in rule with the window's table (`ProcessNaming`).
+    @ObservationIgnored private let naming = ProcessNaming()
 
     /// True while the pointer is over the list rows: the set and order of rows hold still so the
     /// next click lands on the row the user aimed at (D-10, T-02-23). Observed, because a change
@@ -261,12 +257,8 @@ final class TopAppsModel {
 
     private func groups(for snapshot: ProcessSnapshot) -> [ProcessGroup] {
         if let grouped, grouped.sequence == snapshot.sequence { return grouped.groups }
-        // Reads the running apps' bundle paths only, never their icons (RESEARCH Pitfall 11).
-        let regular = Set(
-            NSWorkspace.shared.runningApplications
-                .filter { $0.activationPolicy == .regular }
-                .compactMap { $0.bundleURL?.path })
-        let groups = ProcessGrouping.groups(from: snapshot.processes, regularAppBundlePaths: regular)
+        let groups = ProcessGrouping.groups(
+            from: snapshot.processes, regularAppBundlePaths: naming.regularAppBundlePaths())
         grouped = (snapshot.sequence, groups)
         return groups
     }
@@ -279,19 +271,15 @@ final class TopAppsModel {
         return group.main.map(executableName(of:)) ?? group.id
     }
 
-    /// The executable's last path component, or the kernel short name for pid 0 and path-less
-    /// processes. Never the kernel name when a path exists (T-02-11).
+    /// The executable's last path component (see `ProcessNaming`).
     private static func executableName(of sample: ProcessSample) -> String {
-        if sample.identity.pid != 0, let path = sample.path {
-            return (path as NSString).lastPathComponent
-        }
-        return sample.command
+        ProcessNaming.executableName(of: sample)
     }
 
     // MARK: Rows
 
     private func row(for group: ProcessGroup, sort: SortColumn, frozen: Bool) -> TopAppRowData {
-        let appName = group.appPath.map(appDisplayName(atPath:))
+        let appName = group.appPath.map(naming.appDisplayName(atPath:))
         let (role, availability) = actionInfo(for: group)
         roles[group.id] = role
         availabilities[group.id] = availability
@@ -320,8 +308,8 @@ final class TopAppsModel {
         }
         return TopAppRowData(
             id: group.id,
-            name: appName ?? standaloneName(of: group),
-            icon: icon(forAppAt: group.appPath),
+            name: appName ?? naming.standaloneName(of: group),
+            icon: naming.icon(forAppAt: group.appPath),
             cpuPercent: group.cpuPercent,
             footprintBytes: group.footprintBytes,
             kind: ProcessClassifier.kind(of: group, selfPID: getpid(), selfUID: getuid()),
@@ -447,13 +435,11 @@ final class TopAppsModel {
     }
 
     private static func helperID(of sample: ProcessSample) -> String {
-        "pid:\(sample.identity.pid):\(sample.identity.startMicros)"
+        ProcessNaming.helperID(of: sample)
     }
 
     private func helperRow(for sample: ProcessSample, appName: String) -> HelperRowData {
-        let raw = Self.executableName(of: sample)
-        var name = ProcessText.sanitize(ProcessGrouping.helperName(executableName: raw, appName: appName))
-        if name.isEmpty { name = "—" }
+        let name = naming.helperName(of: sample, appName: appName)
         let pid = Int(sample.identity.pid)
         let id = Self.helperID(of: sample)
         roles[id] = .helper(identity: sample.identity, path: sample.path)
@@ -467,44 +453,5 @@ final class TopAppsModel {
             footprintBytes: sample.footprintBytes,
             availability: offered,
             actionState: actionStates[id] ?? .rest)
-    }
-
-    /// The Finder name of an app bundle, `.app` stripped, sanitized, cached by path.
-    private func appDisplayName(atPath path: String) -> String {
-        if let cached = nameCache[path] { return cached }
-        var name = FileManager.default.displayName(atPath: path)
-        if name.hasSuffix(".app") { name = String(name.dropLast(4)) }
-        var text = ProcessText.sanitize(name)
-        if text.isEmpty { text = "—" }
-        remember(name: text, forKey: path)
-        return text
-    }
-
-    /// A standalone process: the executable name, or the kernel name for pid 0 and path-less ones.
-    private func standaloneName(of group: ProcessGroup) -> String {
-        guard let sample = group.main else { return "—" }
-        let key = sample.path.map { "exe:" + $0 } ?? "cmd:" + sample.command
-        if let cached = nameCache[key] { return cached }
-        var text = ProcessText.sanitize(Self.executableName(of: sample))
-        if text.isEmpty { text = ProcessText.sanitize(sample.command) }
-        if text.isEmpty { text = "—" }
-        remember(name: text, forKey: key)
-        return text
-    }
-
-    private func remember(name: String, forKey key: String) {
-        if nameCache.count >= Self.cacheLimit { nameCache.removeAll() }
-        nameCache[key] = name
-    }
-
-    private func icon(forAppAt appPath: String?) -> NSImage {
-        let key = appPath ?? "unixExecutable"
-        if let cached = iconCache[key] { return cached }
-        let image =
-            appPath.map { NSWorkspace.shared.icon(forFile: $0) }
-            ?? NSWorkspace.shared.icon(for: .unixExecutable)
-        if iconCache.count >= Self.cacheLimit { iconCache.removeAll() }
-        iconCache[key] = image
-        return image
     }
 }
