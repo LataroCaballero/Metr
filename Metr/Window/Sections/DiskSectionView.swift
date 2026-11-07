@@ -1,4 +1,5 @@
 import MetrCore
+import AppKit
 import MetrRender
 import SwiftUI
 
@@ -7,27 +8,47 @@ import SwiftUI
 /// bar. One row per APFS container, so the six system volumes of the startup disk are one row.
 ///
 /// The rows are read-only: there is no Eject button and no other action on a volume (D-17). The
-/// list is read when the window opens and then on the Disk cadence, with no spinner: until the
-/// first reading there are simply no rows. Nothing here animates; the section is gated by
-/// `scripts/perf/window-cost.sh`. The mount / unmount refresh, the startup tint and the list-level
-/// error line follow in the next plan.
+/// list is read when the window opens, on the Disk cadence and whenever a drive is mounted,
+/// unmounted or renamed, with no spinner: until the first reading there are simply no rows. Rows
+/// come and go with a short smooth transition (instant under Reduce Motion); nothing else here
+/// animates, and the section is gated by `scripts/perf/window-cost.sh`. Only the startup disk's bar
+/// ever tints (the Disk ring's own tint, one source); a full archive drive is not an alarm.
 struct DiskSectionView: View {
     let store: MetricsStore
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+    @Environment(\.accessibilitySwitchControlEnabled) private var switchControl
 
     private let text = MetricText(locale: .current)
 
     var body: some View {
         let rows = store.volumes.value ?? []
+        let unreadable = store.volumes == .unavailable
         return Form {
             Section {
-                ForEach(rows) { volume in
-                    VolumeRow(volume: volume, text: text)
+                if unreadable {
+                    // Calm, and it recovers by itself: the read is retried on the Disk cadence and
+                    // on every mount event, and the list returns when one succeeds.
+                    Text("Volumes unavailable. Metr will try again automatically.")
+                        .font(.body)
+                        .foregroundStyle(Color.secondary)
+                } else {
+                    ForEach(rows) { volume in
+                        VolumeRow(
+                            volume: volume, text: text,
+                            tint: volume.role == .startup ? store.diskTint : .none,
+                            speaks: voiceOver || switchControl
+                        )
+                        .transition(.opacity)
+                    }
                 }
             } header: {
                 Text("Volumes")
             }
         }
         .formStyle(.grouped)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: rows.map(\.id))
     }
 }
 
@@ -36,6 +57,10 @@ struct DiskSectionView: View {
 private struct VolumeRow: View {
     let volume: VolumeInfo
     let text: MetricText
+    /// The bar's tint: the Disk ring's own, passed for the startup row only.
+    let tint: RingTint
+    /// VoiceOver or Switch Control runs: the row is built as one explicit accessibility element.
+    let speaks: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -61,11 +86,11 @@ private struct VolumeRow: View {
                         .lineLimit(1)
                         .layoutPriority(1)
                 }
-                Text(subtitle)
+                Text(verbatim: subtitleText)
                     .font(.subheadline)
                     .foregroundStyle(Color.secondary)
                 if let fraction = volume.usedFraction {
-                    UsageBar(fraction: fraction)
+                    UsageBar(fraction: fraction, tint: tint)
                         .accessibilityHidden(true)
                 }
                 if let caption = usedCaption {
@@ -77,7 +102,19 @@ private struct VolumeRow: View {
             }
         }
         .padding(.vertical, 8)
-        .accessibilityElement(children: .combine)
+        .modifier(VolumeRowAccessibility(enabled: speaks, label: spokenLabel))
+    }
+
+    /// "Macintosh HD, Startup disk, 210 GB free of 494 GB"; without capacity figures, the name and
+    /// the kind only (no half-empty sentence).
+    private var spokenLabel: String {
+        guard let free = volume.freeBytes, let total = volume.totalBytes else {
+            return "\(volume.name), \(subtitleText)"
+        }
+        return String(
+            localized:
+                "\(volume.name), \(subtitleText), \(text.byteTotal(UInt64(max(0, free)))) free of \(text.byteTotal(UInt64(max(0, total))))"
+        )
     }
 
     /// "210 GB free", or the em dash when the volume reported no capacity.
@@ -92,19 +129,43 @@ private struct VolumeRow: View {
         return String(localized: "\(text.byteTotal(UInt64(max(0, used)))) used of \(text.byteTotal(UInt64(max(0, total))))")
     }
 
-    private var subtitle: LocalizedStringKey {
+    private var subtitleText: String {
         switch volume.role {
-        case .startup: "Startup disk"
-        case .internal: "Internal"
-        case .external: "External"
+        case .startup: String(localized: "Startup disk")
+        case .internal: String(localized: "Internal")
+        case .external: String(localized: "External")
         }
     }
 }
 
-/// The used fraction of a drive: an 8 pt capsule, neutral. Free space is not an alarm here (the
-/// startup tint comes later), so the fill is the primary color on a quiet track.
+/// The spoken form of a volume row, applied only while VoiceOver or Switch Control runs (the same
+/// rule as the CPU core rows: an explicit element built on every row is wasted work for everyone
+/// else, and the plain texts stay readable without it).
+private struct VolumeRowAccessibility: ViewModifier {
+    let enabled: Bool
+    let label: String
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(label)
+        } else {
+            content
+        }
+    }
+}
+
+/// The used fraction of a drive: an 8 pt capsule on a quiet track. The fill is the primary color;
+/// only the startup disk's bar takes the Disk ring's tint (orange, then red), through `TintPalette`.
 private struct UsageBar: View {
     let fraction: Double
+    let tint: RingTint
+
+    private var fill: Color {
+        TintPalette.color(for: tint).map(Color.init(nsColor:)) ?? Color.primary
+    }
 
     var body: some View {
         Capsule()
@@ -113,7 +174,7 @@ private struct UsageBar: View {
             .overlay(alignment: .leading) {
                 GeometryReader { proxy in
                     Capsule()
-                        .fill(Color.primary)
+                        .fill(fill)
                         .frame(width: proxy.size.width * min(1, max(0, fraction)))
                 }
             }

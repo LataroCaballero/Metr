@@ -389,6 +389,10 @@ enum DebugSnapshotRenderer {
         case single
         /// Twelve drives, one with a very long name: the list scrolls and the name is cut.
         case many
+        /// The startup disk is 93 % full (7 % free): its bar is orange, the others stay neutral.
+        case low
+        /// The drives cannot be read: one quiet line replaces the list.
+        case unavailable
     }
 
     private enum GPUFixtureState {
@@ -423,11 +427,25 @@ enum DebugSnapshotRenderer {
                 network: .wide),
             WindowFixture(name: "disk", section: .disk, populated: true, contentSize: standard, volumes: .live),
             WindowFixture(
-                name: "disk-single", section: .disk, populated: true, contentSize: standard, volumes: .single),
+                name: "disk-one", section: .disk, populated: true, contentSize: standard, volumes: .single),
             WindowFixture(
                 name: "disk-many", section: .disk, populated: true, contentSize: NSSize(width: 900, height: 520),
                 volumes: .many),
+            WindowFixture(name: "disk-low", section: .disk, populated: true, contentSize: standard, volumes: .low),
+            WindowFixture(
+                name: "disk-unavailable", section: .disk, populated: true, contentSize: standard,
+                volumes: .unavailable),
         ]
+    }
+
+    /// What the store is told about the drives: nothing for a fixture without any, an unreadable list,
+    /// or the rows.
+    private static func volumeReading(for state: VolumeFixtureState) -> Reading<[VolumeInfo]>? {
+        switch state {
+        case .none: nil
+        case .unavailable: .unavailable
+        default: .value(volumeRows(for: state))
+        }
     }
 
     /// The volumes of a volume fixture. Figures are decimal bytes, as the system reports them.
@@ -436,10 +454,20 @@ enum DebugSnapshotRenderer {
             id: "disk3", name: "Macintosh HD", role: .startup, totalBytes: 494_384_795_648,
             freeBytes: 210_000_000_000)
         switch state {
-        case .none:
+        case .none, .unavailable:
             return []
         case .single:
             return [startup]
+        case .low:
+            // 7 % free of 245 GB, with an external drive that is even fuller and stays neutral.
+            return [
+                VolumeInfo(
+                    id: "disk3", name: "Macintosh HD", role: .startup, totalBytes: 245_107_195_904,
+                    freeBytes: 17_150_000_000),
+                VolumeInfo(
+                    id: "disk4", name: "Archive", role: .external, totalBytes: 4_000_000_000_000,
+                    freeBytes: 120_000_000_000),
+            ]
         case .live:
             return [
                 startup,
@@ -522,7 +550,11 @@ enum DebugSnapshotRenderer {
         store.beginWindowSession(at: now - 300)
         let memory = MemoryReading(
             usedBytes: 12_025_908_428, totalBytes: totalMemory, swapUsedBytes: 0, freePercent: 60, pressure: .normal)
-        let disk = DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)
+        // The ring's own disk reading drives the startup bar's tint, so the low fixture feeds 7 % free.
+        let disk =
+            fixture.volumes == .low
+            ? DiskReading(totalBytes: 245_107_195_904, availableBytes: 17_150_000_000)
+            : DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)
         guard fixture.populated else {
             store.apply(
                 MetricsBatch(
@@ -558,7 +590,7 @@ enum DebugSnapshotRenderer {
             let batch = MetricsBatch(
                 cpu: .value(reading), memory: memoryBatch,
                 disk: second == 299 ? .value(disk) : nil, network: network, gpu: gpu,
-                volumes: fixture.volumes == .none || second != 299 ? nil : .value(volumeRows(for: fixture.volumes)),
+                volumes: second != 299 ? nil : volumeReading(for: fixture.volumes),
                 elapsed: 1)
             store.apply(batch, at: now - 299 + t)
         }
