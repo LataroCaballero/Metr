@@ -165,4 +165,55 @@ private func waitForTopChild(_ sampler: MetricsSampler, present: Bool, timeoutMs
         #expect(fresh != nil, "no new top child within 1.5 s of the resume")
         if let fresh { #expect(fresh != pid) }
     }
+
+    /// D-05 / Pitfall 4: the window alone runs no top child; the process pass adds one, and
+    /// dropping it resets the process work even though the window stays registered.
+    @Test func windowAloneRunsNoTopChild() async throws {
+        let sampler = MetricsSampler(cadenceScale: 0.05)
+        let recorder = BatchRecorder()
+        sampler.start(onBatch: { recorder.add($0) })
+        sampler.register(.window)
+        try await sleep(600)
+        #expect(sampler.topChildPID() == nil, "a top child runs with only the window registered")
+
+        sampler.register(.windowProcesses)
+        let pid = try #require(
+            try await waitForTopChild(sampler, present: true, timeoutMs: 1500),
+            "no top child within 1.5 s of the process pass being registered")
+        #expect(probe(pid).result == 0)
+
+        let before = recorder.batches.count
+        sampler.cancel(.windowProcesses)
+        let after = try await waitForTopChild(sampler, present: false, timeoutMs: 1000)
+        try await sleep(100)
+        sampler.stop()
+        #expect(after == nil, "the top child survived dropping the process pass")
+        #expect(
+            recorder.batches.dropFirst(before).contains { $0.processes.map(isPending) == true },
+            "no pending processes batch after dropping the process pass")
+    }
+
+    /// Closing the panel while the window shows Processes keeps the one top child alive.
+    @Test func panelCloseKeepsTheChildWhileProcessesIsShown() async throws {
+        let sampler = MetricsSampler(cadenceScale: 0.05)
+        let recorder = BatchRecorder()
+        sampler.start(onBatch: { recorder.add($0) })
+        sampler.register(.panel)
+        let pid = try #require(
+            try await waitForTopChild(sampler, present: true, timeoutMs: 1500),
+            "no top child within 1.5 s of the panel opening")
+        sampler.register(.window)
+        sampler.register(.windowProcesses)
+        try await sleep(50)
+
+        let before = recorder.batches.count
+        sampler.cancel(.panel)
+        try await sleep(500)
+        let still = sampler.topChildPID()
+        sampler.stop()
+        #expect(still == pid, "the top child changed or died when the panel closed")
+        #expect(
+            !recorder.batches.dropFirst(before).contains { $0.processes.map(isPending) == true },
+            "a pending processes batch was emitted while the window still shows Processes")
+    }
 }

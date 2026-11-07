@@ -4,3 +4,12 @@
 public enum WindowSection: String, Sendable, CaseIterable {
     case cpu, memory, disk, network, gpu, processes
 }
+
+/// RED stub: replaced in the GREEN commit.
+public enum WindowDemand {
+    public static func consumers(section: WindowSection, processesVisible: Bool) -> Set<DemandConsumer> { [] }
+
+    public static func transition(
+        from: Set<DemandConsumer>, to: Set<DemandConsumer>
+    ) -> (register: Set<DemandConsumer>, cancel: Set<DemandConsumer>) { ([], []) }
+}

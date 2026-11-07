@@ -22,7 +22,16 @@ import Testing
         let plan = SamplingPlan.make(demand: [.window], suspended: false, constrained: false)
         #expect(plan.tier == .window)
         #expect(plan.baseInterval == 1)
-        #expect(plan.cadence == [.cpu: 1, .memory: 1, .disk: 10, .processes: 2])
+        #expect(plan.cadence == [.cpu: 1, .memory: 1, .disk: 10])
+
+        let withProcesses = SamplingPlan.make(demand: [.window, .windowProcesses], suspended: false, constrained: false)
+        #expect(withProcesses.tier == .window)
+        #expect(withProcesses.baseInterval == 1)
+        #expect(withProcesses.cadence == [.cpu: 1, .memory: 1, .disk: 10, .processes: 2])
+
+        let processesAlone = SamplingPlan.make(demand: [.windowProcesses], suspended: false, constrained: false)
+        #expect(processesAlone.tier == .window)
+        #expect(processesAlone.cadence == [.cpu: 1, .memory: 1, .disk: 10, .processes: 2])
     }
 
     @Test func processesOnlyInPanelAndWindowTiers() {
@@ -33,7 +42,24 @@ import Testing
         #expect(idleConstrained.cadence[.processes] == nil)
         #expect(suspended.cadence[.processes] == nil)
         #expect(SamplingPlan.make(demand: [.panel], suspended: false, constrained: false).cadence[.processes] == 2)
-        #expect(SamplingPlan.make(demand: [.window], suspended: false, constrained: false).cadence[.processes] == 2)
+        #expect(SamplingPlan.make(demand: [.window], suspended: false, constrained: false).cadence[.processes] == nil)
+        #expect(
+            SamplingPlan.make(demand: [.window, .windowProcesses], suspended: false, constrained: false)
+                .cadence[.processes] == 2)
+    }
+
+    @Test func carriesProcessesAndWindow() {
+        #expect(!SamplingPlan.carriesProcesses([]))
+        #expect(!SamplingPlan.carriesProcesses([.window]))
+        #expect(SamplingPlan.carriesProcesses([.panel]))
+        #expect(SamplingPlan.carriesProcesses([.windowProcesses]))
+        #expect(SamplingPlan.carriesProcesses([.panel, .window]))
+
+        #expect(!SamplingPlan.carriesWindow([]))
+        #expect(!SamplingPlan.carriesWindow([.panel]))
+        #expect(SamplingPlan.carriesWindow([.window]))
+        #expect(SamplingPlan.carriesWindow([.windowProcesses]))
+        #expect(SamplingPlan.carriesWindow([.window, .windowProcesses]))
     }
 
     @Test func windowWinsOverPanel() {

@@ -8,7 +8,7 @@ public enum Metric: String, Sendable, Hashable, CaseIterable {
 /// `.window` is reserved for Phase 3 and is not registered by anything yet. Either one also
 /// switches the process list on; with neither, no process is read at all.
 public enum DemandConsumer: String, Sendable, Hashable {
-    case panel, window
+    case panel, window, windowProcesses
 }
 
 public enum SamplingTier: String, Sendable {
@@ -83,6 +83,10 @@ public struct SamplingPlan: Sendable, Equatable {
             constrained: constrained,
             cadenceScale: scale)
     }
+
+    // RED stubs: replaced in the GREEN commit.
+    public static func carriesProcesses(_ demand: Set<DemandConsumer>) -> Bool { false }
+    public static func carriesWindow(_ demand: Set<DemandConsumer>) -> Bool { false }
 
     /// Metrics whose last sample is old enough. Timer jitter is absorbed by treating a metric
     /// as due a quarter of the base interval early; CPU additionally needs a minimum window.
