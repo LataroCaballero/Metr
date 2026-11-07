@@ -1602,6 +1602,66 @@
           }
         }
       }
+    },
+    "Volumes": {
+      "comment": "Disk section header above the list of drives",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Volúmenes"
+          }
+        }
+      }
+    },
+    "Startup disk": {
+      "comment": "Disk section row subtitle for the volume macOS starts from",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disco de arranque"
+          }
+        }
+      }
+    },
+    "Internal": {
+      "comment": "Disk section row subtitle for a drive inside the Mac",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interno"
+          }
+        }
+      }
+    },
+    "External": {
+      "comment": "Disk section row subtitle for a USB, Thunderbolt or SD drive",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Externo"
+          }
+        }
+      }
+    },
+    "%@ used of %@": {
+      "comment": "Disk section row caption under the bar, e.g. 250 GB used of 460 GB",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ usados de %2$@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

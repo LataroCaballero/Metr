@@ -125,8 +125,7 @@ struct WindowRootView: View {
         case .network:
             NetworkSectionView(store: store)
         case .disk:
-            // A later plan of this phase fills this section. Until then the column stays empty.
-            Color.clear
+            DiskSectionView(store: store)
         }
     }
 }

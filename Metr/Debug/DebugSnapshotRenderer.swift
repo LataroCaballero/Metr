@@ -352,6 +352,8 @@ enum DebugSnapshotRenderer {
         var memory: MemoryFixtureState = .lastOnly
         /// What the network history looks like in this fixture.
         var network: NetworkFixtureState = .none
+        /// What the volume list looks like in this fixture.
+        var volumes: VolumeFixtureState = .none
         /// A preset hover position, in seconds before the newest sample: the readout is drawn as if
         /// the pointer rested there. nil = no pointer.
         var hoverSecondsAgo: Double?
@@ -375,6 +377,18 @@ enum DebugSnapshotRenderer {
         case idle
         /// The long-text case: the largest hero values the window has to fit (128.4 MB/s, 999.9 kB/s).
         case wide
+    }
+
+    private enum VolumeFixtureState {
+        /// No volume reading is fed.
+        case none
+        /// The startup disk, an internal disk, an external drive that is nearly full and one that
+        /// reports no capacity.
+        case live
+        /// A Mac with only its startup volume: one row and no empty-state text.
+        case single
+        /// Twelve drives, one with a very long name: the list scrolls and the name is cut.
+        case many
     }
 
     private enum GPUFixtureState {
@@ -407,7 +421,54 @@ enum DebugSnapshotRenderer {
             WindowFixture(
                 name: "network-min", section: .network, populated: true, contentSize: NSSize(width: 900, height: 520),
                 network: .wide),
+            WindowFixture(name: "disk", section: .disk, populated: true, contentSize: standard, volumes: .live),
+            WindowFixture(
+                name: "disk-single", section: .disk, populated: true, contentSize: standard, volumes: .single),
+            WindowFixture(
+                name: "disk-many", section: .disk, populated: true, contentSize: NSSize(width: 900, height: 520),
+                volumes: .many),
         ]
+    }
+
+    /// The volumes of a volume fixture. Figures are decimal bytes, as the system reports them.
+    private static func volumeRows(for state: VolumeFixtureState) -> [VolumeInfo] {
+        let startup = VolumeInfo(
+            id: "disk3", name: "Macintosh HD", role: .startup, totalBytes: 494_384_795_648,
+            freeBytes: 210_000_000_000)
+        switch state {
+        case .none:
+            return []
+        case .single:
+            return [startup]
+        case .live:
+            return [
+                startup,
+                VolumeInfo(
+                    id: "disk1", name: "Projects", role: .internal, totalBytes: 1_000_000_000_000,
+                    freeBytes: 640_000_000_000),
+                VolumeInfo(
+                    id: "disk4", name: "Lexar", role: .external, totalBytes: 1_023_966_052_352,
+                    freeBytes: 899_851_485_184),
+                VolumeInfo(
+                    id: "disk5", name: "Archive", role: .external, totalBytes: 4_000_000_000_000,
+                    freeBytes: 120_000_000_000),
+                VolumeInfo(id: "disk7", name: "Camera Card", role: .external, totalBytes: nil, freeBytes: nil),
+            ]
+        case .many:
+            var rows = [startup]
+            rows.append(
+                VolumeInfo(
+                    id: "disk4",
+                    name: "Photography archive 2019 to 2026, full-resolution originals, proofs, edits and exports for every client",
+                    role: .external, totalBytes: 8_000_000_000_000, freeBytes: 2_345_000_000_000))
+            for index in 1...10 {
+                rows.append(
+                    VolumeInfo(
+                        id: "disk\(10 + index)", name: "Drive \(index)", role: .external,
+                        totalBytes: 500_000_000_000, freeBytes: Int64(index) * 40_000_000_000))
+            }
+            return rows
+        }
     }
 
     /// The memory reading of second `second` of a memory fixture: Normal with swap, or the pressure
@@ -496,7 +557,9 @@ enum DebugSnapshotRenderer {
                 fixture.network == .none ? nil : .value(networkReading(second: second, state: fixture.network))
             let batch = MetricsBatch(
                 cpu: .value(reading), memory: memoryBatch,
-                disk: second == 299 ? .value(disk) : nil, network: network, gpu: gpu, elapsed: 1)
+                disk: second == 299 ? .value(disk) : nil, network: network, gpu: gpu,
+                volumes: fixture.volumes == .none || second != 299 ? nil : .value(volumeRows(for: fixture.volumes)),
+                elapsed: 1)
             store.apply(batch, at: now - 299 + t)
         }
         return store
@@ -567,6 +630,7 @@ enum DebugSnapshotRenderer {
         case .gpu: GPUSectionView(store: store)
         case .memory: MemorySectionView(store: store)
         case .network: NetworkSectionView(store: store)
+        case .disk: DiskSectionView(store: store)
         default: Color.clear
         }
     }
