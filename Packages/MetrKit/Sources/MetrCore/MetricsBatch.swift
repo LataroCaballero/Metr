@@ -19,6 +19,9 @@ public struct MetricsBatch: Sendable, Equatable {
     /// The user's processes (D-20). Present only while the panel or window is open, and
     /// `.pending` once on the last close so a later open never shows stale numbers.
     public var processes: Reading<ProcessSnapshot>?
+    /// The GPU (GPU-01). Window-only: present while the window is open, and `.pending` once when
+    /// the window closes, so a reopened window never shows a stale value.
+    public var gpu: Reading<GPUReading>?
     public var elapsed: Double
 
     public init(
@@ -26,12 +29,14 @@ public struct MetricsBatch: Sendable, Equatable {
         memory: Reading<MemoryReading>? = nil,
         disk: Reading<DiskReading>? = nil,
         processes: Reading<ProcessSnapshot>? = nil,
+        gpu: Reading<GPUReading>? = nil,
         elapsed: Double
     ) {
         self.cpu = cpu
         self.memory = memory
         self.disk = disk
         self.processes = processes
+        self.gpu = gpu
         self.elapsed = elapsed
     }
 }

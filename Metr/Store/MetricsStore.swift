@@ -13,6 +13,9 @@ final class MetricsStore {
     /// The user's processes, sampled only while the panel or window is open (D-20). `.pending`
     /// until the first reading and again after the last close.
     private(set) var processes: Reading<ProcessSnapshot> = .pending
+    /// The GPU (GPU-01), sampled only while the window is open. `.pending` until the first reading
+    /// and again after the window closes, so a reopened window never shows a stale value.
+    private(set) var gpu: Reading<GPUReading> = .pending
     /// Disk tint with its 1-point hysteresis (D-03). One state shared by the glyph and the panel.
     private(set) var diskTint: RingTint = .none
 
@@ -25,6 +28,8 @@ final class MetricsStore {
     /// The CPU history of the open window: first = user, second = system, both on the whole-Mac
     /// scale. One stored property per series, so `@Observable` invalidates per chart.
     private(set) var cpuHistory = HistoryBuffer<SeriesPair>()
+    /// The GPU history of the open window: utilization 0...1, a nil value is a gap.
+    private(set) var gpuHistory = HistoryBuffer<Double>()
 
     /// The system's core tiers (`hw.perflevelN`, perflevel 0 first) with their core counts, read once.
     /// Empty when the layout cannot be read. They name the cluster bars, in the panel and in the
@@ -79,6 +84,8 @@ final class MetricsStore {
     /// Ends the session when the window closes: recording stops and every buffer is discarded.
     func endWindowSession() {
         clearHistory()
+        // Window-only readings do not outlive the window (D-06).
+        gpu = .pending
         windowSessionActive = false
         windowSessionStart = nil
         DebugHooks.log("history cleared")
@@ -86,9 +93,11 @@ final class MetricsStore {
 
     private func clearHistory() {
         cpuHistory.removeAll()
+        gpuHistory.removeAll()
     }
 
     func apply(_ batch: MetricsBatch, at time: Double = Date.now.timeIntervalSinceReferenceDate) {
+        var recorded = false
         if let reading = batch.cpu {
             // A baseline-only sample after launch or wake is .pending: keep the last real
             // value until the primed one arrives, so the ring never flashes to a track.
@@ -98,6 +107,7 @@ final class MetricsStore {
                 cpu = reading
             }
             recordCPUHistory(reading, at: time)
+            recorded = true
         }
         if let reading = batch.memory {
             memory = reading
@@ -110,6 +120,19 @@ final class MetricsStore {
             DebugHooks.log(Self.describe(processes: reading))
             for line in Self.describeProbes(reading, pids: DebugHooks.probePIDs) { DebugHooks.log(line) }
         }
+        if let reading = batch.gpu {
+            gpu = reading
+            DebugHooks.log(Self.describe(gpu: reading))
+            if windowSessionActive {
+                gpuHistory.append(time: time, value: reading.value?.utilization)
+                recorded = true
+            }
+        }
+        if recorded, windowSessionActive {
+            // Counts only (T-03-07). mem is filled in by the memory section (03-05).
+            DebugHooks.log(
+                "history cpu=\(cpuHistory.samples.count) mem=0 gpu=\(gpuHistory.samples.count)")
+        }
         diskTint = TintLogic.disk(freeFraction: disk.value?.freeFraction, previous: diskTint)
         didApply?()
         DebugHooks.log(Self.describe(cpu: cpu, memory: memory, disk: disk, thermal: thermal))
@@ -121,7 +144,17 @@ final class MetricsStore {
         guard windowSessionActive else { return }
         let pair = reading.value.map { SeriesPair(first: $0.user, second: $0.system) }
         cpuHistory.append(time: time, value: pair)
-        DebugHooks.log("history cpu=\(cpuHistory.samples.count)")
+    }
+
+    /// Numbers only: `gpu util=0.45 cores=8`, or the pending / unavailable word. DEBUG log only (T-03-11).
+    private static func describe(gpu reading: Reading<GPUReading>) -> String {
+        switch reading {
+        case .pending: return "gpu pending"
+        case .unavailable: return "gpu unavailable"
+        case .value(let value):
+            let cores = value.coreCount.map { String($0) } ?? "-"
+            return "gpu util=\(String(format: "%.2f", value.utilization)) cores=\(cores)"
+        }
     }
 
     /// Counts and a ready flag only: never a process name, path or command line (T-02-08).

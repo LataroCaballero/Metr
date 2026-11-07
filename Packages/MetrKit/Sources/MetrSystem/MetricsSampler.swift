@@ -7,13 +7,14 @@ import MetrCore
 /// values to a `@Sendable` sink.
 public final class MetricsSampler: @unchecked Sendable {
     /// Metrics this build has collectors for.
-    private static let supported: Set<Metric> = [.cpu, .memory, .disk, .processes]
+    private static let supported: Set<Metric> = [.cpu, .memory, .disk, .gpu, .processes]
 
     private let queue = DispatchQueue(label: "Metr.sampler", qos: .utility)
     private let scheduler: SamplingScheduler
     private let cpu = CPUCollector()  // confined to `queue`
     private let memory = MemoryCollector()  // confined to `queue`
     private let disk = DiskCollector()  // confined to `queue`
+    private let gpu = GPUCollector()  // confined to `queue`; touches IOKit only while the window is open
     private let processes: ProcessCollector  // confined to `queue`
     /// The one top child behind the process list. Started by the collector on the first process
     /// sample and stopped by its `reset()`, so it exists only while the panel is open or the window shows Processes.
@@ -66,6 +67,7 @@ public final class MetricsSampler: @unchecked Sendable {
                 if sampled.contains(.cpu) { batch.cpu = cpu.sample() }
                 if sampled.contains(.memory) { batch.memory = memory.sample() }
                 if sampled.contains(.disk) { batch.disk = disk.sample() }
+                if sampled.contains(.gpu) { batch.gpu = gpu.sample() }
                 if sampled.contains(.processes) { batch.processes = processes.sample() }
                 onBatch(batch)
             },
@@ -100,6 +102,11 @@ public final class MetricsSampler: @unchecked Sendable {
                     // stale numbers. Both run on this serial queue, ahead of any later baseline.
                     self.processes.reset()
                     self.emit?(MetricsBatch(processes: .pending, elapsed: 0))
+                }
+                if SamplingPlan.carriesWindow(before) && !SamplingPlan.carriesWindow(self.registry.active) {
+                    // Window-only metrics are never left stale: the window tier ended, so the store
+                    // gets a pending GPU reading and a reopened window starts from nothing.
+                    self.emit?(MetricsBatch(gpu: .pending, elapsed: 0))
                 }
                 self.scheduler.setDemand(self.registry.active)
             }

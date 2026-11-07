@@ -83,8 +83,12 @@ struct WindowRootView: View {
         case .disk:
             guard let disk = store.disk.value else { return nil }
             return String(localized: "\(text.diskBytes(disk.availableBytes)) free")
-        case .network, .gpu, .processes:
-            // Network and GPU get their values with their own plans; Processes never has one.
+        case .gpu:
+            // Nothing while pending or unreadable: never a fake 0 (D-04, D-20).
+            guard let gpu = store.gpu.value else { return nil }
+            return text.percent(gpu.utilization)
+        case .network, .processes:
+            // Network gets its value with its own plan; Processes never has one.
             return nil
         }
     }
