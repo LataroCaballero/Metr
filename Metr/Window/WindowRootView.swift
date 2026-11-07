@@ -137,10 +137,12 @@ private struct SidebarRow: View {
 
 /// The CPU detail for now: the live whole-Mac total as the hero value. Plan 03-03 replaces it with
 /// the full CPU section (history chart, per-core bars).
+///
+/// The value does not animate: a `.numericText()` transition on a value that changes every second
+/// kept the window at about 14 % of a core in the Debug build (window-cost.sh cpu, 45 wakeups/s)
+/// against about 1 % without it. Plan 03-03 measures before it animates anything in the window.
 private struct CPUHeroView: View {
     let store: MetricsStore
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let text = MetricText(locale: .current)
 
@@ -158,8 +160,6 @@ private struct CPUHeroView: View {
                         .font(.title)
                         .fontWeight(.semibold)
                         .monospacedDigit()
-                        .contentTransition(reduceMotion ? .identity : .numericText())
-                        .animation(reduceMotion ? nil : .smooth(duration: 0.4), value: total)
                     if failed {
                         Text("Unavailable")
                             .font(.subheadline)

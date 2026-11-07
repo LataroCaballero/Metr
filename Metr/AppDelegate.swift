@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// DEBUG only: drives the window from METR_DEBUG_WINDOW_SCRIPT, `step@seconds` pairs separated
-    /// by `;`. A step is a section name, `last` or `close`. Release has no script and no environment name.
+    /// by `;`. A step is a section name, `last`, `miniaturize`, `deminiaturize` or `close`. Release has no script and no environment name.
     private func runWindowScriptIfRequested() {
         #if DEBUG
         for (step, seconds) in DebugHooks.windowScript {
@@ -67,6 +67,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.showWindow(.lastVisited)
                     } else if step == "close" {
                         self.windowController?.closeWindow()
+                    } else if step == "miniaturize" {
+                        self.windowController?.miniaturizeForScript()
+                    } else if step == "deminiaturize" {
+                        self.windowController?.deminiaturizeForScript()
                     } else if let section = WindowSection(rawValue: step) {
                         self.showWindow(.section(section))
                     } else {

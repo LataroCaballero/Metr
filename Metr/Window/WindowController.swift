@@ -106,6 +106,11 @@ final class WindowController: NSWindowController, NSWindowDelegate {
         window?.performClose(nil)
     }
 
+    #if DEBUG
+    func miniaturizeForScript() { window?.miniaturize(nil) }
+    func deminiaturizeForScript() { window?.deminiaturize(nil) }
+    #endif
+
     private func resolve(_ route: WindowRoute) -> WindowSection {
         switch route {
         case .lastVisited: model.restoredSection()
@@ -139,6 +144,17 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     }
 
     // MARK: NSWindowDelegate
+
+    /// Minimizing drops only the process pass (and with it the top child); the cheap window metrics
+    /// keep running so the charts keep filling (D-05, D-06). No other visibility signal is observed
+    /// (owner decision of 2026-11-02).
+    func windowDidMiniaturize(_ notification: Notification) {
+        applyDemand()
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        applyDemand()
+    }
 
     func windowWillClose(_ notification: Notification) {
         isShown = false
