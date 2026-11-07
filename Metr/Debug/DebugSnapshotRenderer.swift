@@ -3,6 +3,12 @@ import AppKit
 import MetrCore
 import SwiftUI
 
+/// A window that may sit outside every screen: AppKit would otherwise pull a titled window back
+/// onto a display when it is ordered in.
+private final class OffscreenWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
+}
+
 /// DEBUG-only: renders the panel fixtures to PNG files and exits, so a CLI run can review the
 /// layout in EN and ES, light and dark, without a click (T-01-13: writes only `panel-*.png`
 /// or `welcome-*.png` inside the directory it is given, and is compiled out of Release).
@@ -321,9 +327,147 @@ enum DebugSnapshotRenderer {
                 }
             }
         }
-        // The render gate compares this line with the PNGs on disk, so it measures what was written.
-        DebugHooks.log("rendered-total panel=\(panelCount) welcome=\(welcomeCount)")
-        NSApp.terminate(nil)
+        // The window fixtures need the run loop (the real window lays out and draws on it), so they
+        // render asynchronously; the totals line and the exit come after the last one.
+        Task { @MainActor in
+            let windowCount = await renderWindows(to: directory, language: language)
+            // The render gate compares this line with the PNGs on disk, so it measures what was written.
+            DebugHooks.log("rendered-total panel=\(panelCount) welcome=\(welcomeCount) window=\(windowCount)")
+            NSApp.terminate(nil)
+        }
+    }
+
+    // MARK: Window fixtures
+
+    /// A window fixture: the section to show, the history to feed the store, and the content size.
+    private struct WindowFixture {
+        let name: String
+        let section: WindowSection
+        /// 5 minutes of synthetic CPU history plus per-core values; false = nothing sampled yet.
+        let populated: Bool
+        let contentSize: NSSize
+    }
+
+    private static var windowFixtures: [WindowFixture] {
+        let standard = NSSize(width: 1000, height: 640)
+        return [
+            WindowFixture(name: "cpu", section: .cpu, populated: true, contentSize: standard),
+            WindowFixture(name: "cpu-pending", section: .cpu, populated: false, contentSize: standard),
+            WindowFixture(
+                name: "cpu-min", section: .cpu, populated: true, contentSize: NSSize(width: 900, height: 520)),
+        ]
+    }
+
+    /// A store holding a fixture's own history: a window session that began 300 s ago and one
+    /// synthetic batch per second since, applied with explicit times so no wall clock is involved.
+    private static func windowStore(for fixture: WindowFixture) -> MetricsStore {
+        let store = MetricsStore()
+        let now = Date.now.timeIntervalSinceReferenceDate
+        store.beginWindowSession(at: now - 300)
+        let memory = MemoryReading(
+            usedBytes: 12_025_908_428, totalBytes: totalMemory, swapUsedBytes: 0, freePercent: 60, pressure: .normal)
+        let disk = DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)
+        guard fixture.populated else {
+            store.apply(MetricsBatch(memory: .value(memory), disk: .value(disk), elapsed: 1), at: now)
+            return store
+        }
+        let performance = [0.62, 0.41, 0.18, 0.07]
+        let efficiency = [0.30, 0.22, 0.15, 0.11, 0.06, 0.03]
+        for second in 0..<300 {
+            let t = Double(second)
+            // A busy minute, a quiet one, a busy tail: both series move so the stacking is visible.
+            let user = max(0.02, min(0.9, 0.22 + 0.14 * sin(t / 18) + 0.08 * sin(t / 5.5)))
+            let system = max(0.01, min(0.4, 0.09 + 0.05 * sin(t / 11 + 1) + 0.02 * sin(t / 3)))
+            let clusters = [
+                CPUCluster(name: "Performance", usage: 0.32, coreUsage: performance),
+                CPUCluster(name: "Efficiency", usage: 0.15, coreUsage: efficiency),
+            ]
+            let reading = CPUReading(total: user + system, user: user, system: system, clusters: clusters)
+            let batch = MetricsBatch(
+                cpu: .value(reading), memory: second == 299 ? .value(memory) : nil,
+                disk: second == 299 ? .value(disk) : nil, elapsed: 1)
+            store.apply(batch, at: now - 299 + t)
+        }
+        return store
+    }
+
+    /// The sidebar's width in the window (UI-SPEC Shell: ideal 220 pt), taken off the content width
+    /// to get the detail column the section fixtures render in.
+    private static let sidebarWidth: CGFloat = 220
+
+    /// Renders every window fixture in light and dark.
+    ///
+    /// Assumption A7 outcome (03-03): the real `WindowRootView` in an off-screen window does not
+    /// draw through `cacheDisplay` or `CALayer.render`: the Liquid Glass sidebar and the grouped
+    /// detail come out blank. So each fixture renders the detail column's content, the section view
+    /// itself, hosted in an `NSHostingView` inside an off-screen window, which AppKit-backed grouped
+    /// Forms and Swift Charts do draw in. The sidebar and toolbar chrome are covered by the
+    /// end-of-phase human check. Width is the window's content width minus the sidebar.
+    private static func renderWindows(to directory: URL, language: String) async -> Int {
+        var count = 0
+        for fixture in windowFixtures {
+            for scheme in [ColorScheme.light, .dark] {
+                let store = windowStore(for: fixture)
+                let size = NSSize(
+                    width: fixture.contentSize.width - sidebarWidth, height: fixture.contentSize.height)
+                let content = detailView(for: fixture.section, store: store)
+                    .frame(width: size.width, height: size.height)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .environment(\.colorScheme, scheme)
+                let host = NSHostingView(rootView: content)
+                host.frame = NSRect(origin: .zero, size: size)
+                let window = OffscreenWindow(
+                    contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless],
+                    backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+                window.contentView = host
+                // One point of it overlaps the main screen's left edge, because a window with no
+                // visible point is occluded and SwiftUI stops drawing it; it is made see-through.
+                let edge = NSScreen.screens.first?.frame.minX ?? 0
+                window.setFrameOrigin(NSPoint(x: edge - size.width + 1, y: 0))
+                window.alphaValue = 0.01
+                window.ignoresMouseEvents = true
+                window.orderFront(nil)
+                try? await Task.sleep(for: .milliseconds(500))
+                host.layoutSubtreeIfNeeded()
+
+                let name = "window-\(language)-\(fixture.name)-\(scheme == .dark ? "dark" : "light").png"
+                if let written = snapshot(host, to: directory.appending(path: name)) {
+                    DebugHooks.log(
+                        "rendered \(name) width=\(Int(written.width.rounded())) height=\(Int(written.height.rounded()))")
+                    count += 1
+                }
+                window.close()
+            }
+        }
+        return count
+    }
+
+    /// The detail column of a section, as `WindowRootView` shows it.
+    @ViewBuilder
+    private static func detailView(for section: WindowSection, store: MetricsStore) -> some View {
+        switch section {
+        case .cpu: CPUSectionView(store: store)
+        default: Color.clear
+        }
+    }
+
+    /// Draws a view at 2x into a PNG with `cacheDisplay`. Returns its size in points, or nil when
+    /// nothing was written.
+    private static func snapshot(_ view: NSView, to url: URL) -> NSSize? {
+        let bounds = view.bounds
+        guard bounds.width > 0, bounds.height > 0,
+            let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: Int(bounds.width * 2), pixelsHigh: Int(bounds.height * 2),
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+        else { return nil }
+        rep.size = bounds.size
+        view.cacheDisplay(in: bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]), (try? png.write(to: url)) != nil
+        else { return nil }
+        return bounds.size
     }
 
     /// The backdrop exists only in the renderer, standing in for the popover's glass. Returns the

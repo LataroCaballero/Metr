@@ -52,8 +52,124 @@ struct CPUSectionView: View {
                 LabeledContent("System", value: store.cpu.value.map { text.percent($0.system) } ?? "—")
                     .monospacedDigit()
             }
+            // One section per core cluster, in hw.perflevelN order (WIN-03, D-09).
+            ForEach(clusters) { cluster in
+                ClusterSection(cluster: cluster, text: text)
+            }
         }
         .formStyle(.grouped)
+    }
+
+    /// The cluster sections to draw. With a reading they come from its clusters; before the first
+    /// sample or after a failed read they come from the system's tiers with track-only bars, so the
+    /// names and counts are there at open. A split that cannot be read gives none: no invented P/E.
+    private var clusters: [CoreCluster] {
+        let levels = store.coreLevels
+        if let reading = store.cpu.value {
+            return reading.clusters.enumerated().compactMap { index, cluster in
+                let count = levels.first { $0.name == cluster.name }?.logicalCPUs ?? cluster.coreUsage.count
+                guard count > 0 else { return nil }
+                let usage: [Double?] =
+                    cluster.coreUsage.count == count ? cluster.coreUsage : Array(repeating: nil, count: count)
+                return CoreCluster(id: index, name: cluster.name, usage: usage)
+            }
+        }
+        return levels.enumerated().map { index, level in
+            CoreCluster(id: index, name: level.name, usage: Array(repeating: nil, count: level.logicalCPUs))
+        }
+    }
+}
+
+/// One core cluster as the view draws it: the system's tier name and one fraction per core, nil
+/// while there is none to show.
+private struct CoreCluster: Identifiable {
+    let id: Int
+    let name: String
+    let usage: [Double?]
+}
+
+/// A cluster's Form section: a header with the tier name and core count, then the per-core grid.
+private struct ClusterSection: View {
+    let cluster: CoreCluster
+    let text: MetricText
+
+    var body: some View {
+        Section {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 24)], spacing: 8) {
+                ForEach(Array(cluster.usage.enumerated()), id: \.offset) { index, fraction in
+                    CoreBarRow(
+                        number: index + 1, tier: cluster.name, fraction: fraction,
+                        percent: fraction.map { text.percent($0) })
+                }
+            }
+        } header: {
+            Text(verbatim: Self.title(for: cluster.name, count: cluster.usage.count))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(cluster.name)
+        }
+    }
+
+    /// The tier name through the localized table for the names this app knows; any other system
+    /// name is shown raw (UI-SPEC "Cores"). Plural variations live in the catalog.
+    static func title(for name: String, count: Int) -> String {
+        switch name {
+        case "Performance": String(localized: "Performance · \(count) cores")
+        case "Efficiency": String(localized: "Efficiency · \(count) cores")
+        case "Super": String(localized: "Super · \(count) cores")
+        default: String(localized: "\(name) · \(count) cores")
+        }
+    }
+}
+
+/// One core: its number within the cluster, an 8 pt capsule bar and the percent. Never tinted, and
+/// never animated (the width changes once per second; a spring would blur the exact number).
+private struct CoreBarRow: View {
+    let number: Int
+    let tier: String
+    let fraction: Double?
+    let percent: String?
+
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+    @Environment(\.accessibilitySwitchControlEnabled) private var switchControl
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(verbatim: String(number))
+                .font(.subheadline)
+                .foregroundStyle(Color.secondary)
+                .monospacedDigit()
+                .frame(width: 20, alignment: .trailing)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.primary.opacity(contrast == .increased ? 0.30 : 0.15))
+                // Under 1 % the track only, so no stray cap shows; at 99.5 % and over a full capsule.
+                if let fraction, fraction >= 0.01 {
+                    Capsule()
+                        .fill(Color.primary)
+                        .scaleEffect(x: fraction >= 0.995 ? 1 : fraction, y: 1, anchor: .leading)
+                }
+            }
+            .frame(height: 8)
+            Text(verbatim: percent ?? "—")
+                .font(.subheadline)
+                .foregroundStyle(Color.primary)
+                .monospacedDigit()
+                .frame(width: 36, alignment: .trailing)
+        }
+        .frame(height: 20)
+        .modifier(RowAccessibility(enabled: voiceOver || switchControl, label: spokenName, value: percent ?? ""))
+    }
+
+    /// "Performance core 1": the tier through the localized table, any other tier by its raw name.
+    private var spokenName: String {
+        switch tier {
+        case "Performance": String(localized: "Performance core \(number)")
+        case "Efficiency": String(localized: "Efficiency core \(number)")
+        case "Super": String(localized: "Super core \(number)")
+        default: String(localized: "\(tier) core \(number)")
+        }
     }
 }
 
@@ -138,5 +254,27 @@ private struct CPUHistoryChart: View {
         }
         // The numbers under the chart carry the same information for VoiceOver.
         .accessibilityHidden(true)
+    }
+}
+
+/// The spoken form of a core row ("Performance core 1, 41 percent"), applied only while VoiceOver or
+/// Switch Control runs. An explicit accessibility element on each of the ten-odd rows, whose
+/// content changes every second, kept the Debug window at 5 to 9 % of a core against about 2.5 %
+/// without (window-cost.sh cpu, 03-03); the rows' plain texts stay readable without it.
+private struct RowAccessibility: ViewModifier {
+    let enabled: Bool
+    let label: String
+    let value: String
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(label)
+                .accessibilityValue(value)
+        } else {
+            content
+        }
     }
 }

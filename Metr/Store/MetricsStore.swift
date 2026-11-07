@@ -26,9 +26,13 @@ final class MetricsStore {
     /// scale. One stored property per series, so `@Observable` invalidates per chart.
     private(set) var cpuHistory = HistoryBuffer<SeriesPair>()
 
-    /// The system's names for the core tiers (`hw.perflevelN.name`, perflevel 0 first), read once.
-    /// Empty when the layout cannot be read. They name the cluster bars while CPU is not yet sampled.
-    let coreLevelNames: [String] = CPUCollector.readLayout()?.levels.map(\.name) ?? []
+    /// The system's core tiers (`hw.perflevelN`, perflevel 0 first) with their core counts, read once.
+    /// Empty when the layout cannot be read. They name the cluster bars, in the panel and in the
+    /// window, while CPU is not yet sampled.
+    let coreLevels: [CoreLevel] = CPUCollector.readLayout()?.levels ?? []
+
+    /// The tier names alone, for the panel.
+    var coreLevelNames: [String] { coreLevels.map(\.name) }
 
     /// The Mac's thermal state (PANEL-05). Read once at init and on the system's change
     /// notification; never polled (D-19).

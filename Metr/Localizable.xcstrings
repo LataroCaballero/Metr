@@ -1158,6 +1158,222 @@
           }
         }
       }
+    },
+    "Performance · %lld cores": {
+      "comment": "CPU section: header of the performance core cluster with its core count",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Performance · %lld core"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Performance · %lld cores"
+                }
+              }
+            }
+          }
+        },
+        "es": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Rendimiento · %lld núcleo"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Rendimiento · %lld núcleos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Efficiency · %lld cores": {
+      "comment": "CPU section: header of the efficiency core cluster with its core count",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Efficiency · %lld core"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Efficiency · %lld cores"
+                }
+              }
+            }
+          }
+        },
+        "es": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Eficiencia · %lld núcleo"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Eficiencia · %lld núcleos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Super · %lld cores": {
+      "comment": "CPU section: header of the Super core cluster (M5 family) with its core count",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Super · %lld core"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Super · %lld cores"
+                }
+              }
+            }
+          }
+        },
+        "es": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Super · %lld núcleo"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Super · %lld núcleos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%@ · %lld cores": {
+      "comment": "CPU section: header of a core cluster with a name this app has no translation for: system name, then core count",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%@ · %lld core"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%@ · %lld cores"
+                }
+              }
+            }
+          }
+        },
+        "es": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ · %2$lld núcleo"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ · %2$lld núcleos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Performance core %lld": {
+      "comment": "VoiceOver: a performance core row, numbered within its cluster",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Núcleo de rendimiento %lld"
+          }
+        }
+      }
+    },
+    "Efficiency core %lld": {
+      "comment": "VoiceOver: an efficiency core row, numbered within its cluster",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Núcleo de eficiencia %lld"
+          }
+        }
+      }
+    },
+    "Super core %lld": {
+      "comment": "VoiceOver: a Super core row (M5 family), numbered within its cluster",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Núcleo Super %lld"
+          }
+        }
+      }
+    },
+    "%@ core %lld": {
+      "comment": "VoiceOver: a core row of a cluster with a name this app has no translation for: system name, then number",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Núcleo %1$@ %2$lld"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

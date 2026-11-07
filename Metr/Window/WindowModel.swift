@@ -48,6 +48,12 @@ final class WindowModel {
         if persistsState { section = Self.storedSection() ?? .cpu }
     }
 
+    /// A model for the DEBUG snapshot renderer: a fixed section, nothing persisted.
+    init(persistsState: Bool, section: WindowSection) {
+        self.persistsState = persistsState
+        self.section = section
+    }
+
     func setOpen(_ open: Bool) {
         isOpen = open
     }
