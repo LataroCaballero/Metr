@@ -164,3 +164,37 @@ public enum ChartTimeAxis {
         [end - span, end]
     }
 }
+
+/// Which sample a hovering pointer is at.
+public enum ChartReadout {
+    /// The present sample nearest to `time`; a tie goes to the earlier sample, gaps are skipped, nil
+    /// for an empty or all-gap history.
+    public static func nearest<Value: Sendable & Equatable>(
+        time: Double, in samples: [HistorySample<Value>]
+    ) -> HistorySample<Value>? {
+        // RED stub: compiles, behaves wrongly until the GREEN commit.
+        nil
+    }
+}
+
+/// The four numbers VoiceOver hears for a chart: the latest value and the range and mean of the
+/// window.
+public struct ChartSummary: Sendable, Equatable {
+    public var now: Double
+    public var lowest: Double
+    public var highest: Double
+    public var average: Double
+
+    public init(now: Double, lowest: Double, highest: Double, average: Double) {
+        self.now = now
+        self.lowest = lowest
+        self.highest = highest
+        self.average = average
+    }
+
+    /// Over the present values, in order; the latest present value is `now`. nil when there is none.
+    public static func make(_ values: [Double?]) -> ChartSummary? {
+        // RED stub: compiles, behaves wrongly until the GREEN commit.
+        nil
+    }
+}

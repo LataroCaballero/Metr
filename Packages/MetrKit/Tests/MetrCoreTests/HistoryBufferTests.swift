@@ -138,4 +138,42 @@ import Testing
         #expect(ChartTimeAxis.gridTimes(end: 1000) == [700, 760, 820, 880, 940, 1000])
         #expect(ChartTimeAxis.ends(end: 1000) == [700, 1000])
     }
+
+    // MARK: Readout and summary
+
+    @Test func readoutPicksTheNearestSample() {
+        let samples = [
+            HistorySample(time: 1, value: 10), HistorySample(time: 2, value: 20),
+            HistorySample(time: 3, value: 30),
+        ]
+        #expect(ChartReadout.nearest(time: 2.4, in: samples)?.time == 2)
+        // Exactly between two samples: the earlier one.
+        #expect(ChartReadout.nearest(time: 2.5, in: samples)?.time == 2)
+        #expect(ChartReadout.nearest(time: 2.6, in: samples)?.time == 3)
+        // Outside the history: the end it is nearest to.
+        #expect(ChartReadout.nearest(time: -5, in: samples)?.time == 1)
+        #expect(ChartReadout.nearest(time: 99, in: samples)?.time == 3)
+        #expect(ChartReadout.nearest(time: 2, in: [HistorySample<Int>]()) == nil)
+
+        // A gap is not a sample: the pointer over it reads the nearest present one, the earlier on a tie.
+        let withGap = [
+            HistorySample(time: 1, value: 10), HistorySample(time: 2, value: nil),
+            HistorySample(time: 3, value: 30),
+        ]
+        #expect(ChartReadout.nearest(time: 2, in: withGap)?.time == 1)
+        #expect(ChartReadout.nearest(time: 2.2, in: withGap)?.time == 3)
+        #expect(ChartReadout.nearest(time: 2, in: [HistorySample<Int>(time: 1, value: nil)]) == nil)
+    }
+
+    @Test func summaryIgnoresGaps() {
+        let summary = ChartSummary.make([0.2, nil, 0.6, 0.4])
+        #expect(summary?.now == 0.4)
+        #expect(summary?.lowest == 0.2)
+        #expect(summary?.highest == 0.6)
+        #expect(abs((summary?.average ?? -1) - 0.4) < 1e-9)
+        // The latest present value is `now`, even when the newest sample is a gap.
+        #expect(ChartSummary.make([0.5, 0.1, nil])?.now == 0.1)
+        #expect(ChartSummary.make([nil, nil]) == nil)
+        #expect(ChartSummary.make([]) == nil)
+    }
 }
