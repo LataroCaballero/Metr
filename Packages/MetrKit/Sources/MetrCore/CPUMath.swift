@@ -19,7 +19,9 @@ public struct CPUCluster: Sendable, Equatable {
     public var name: String
     /// Average busy fraction of the cluster's cores, 0...1.
     public var usage: Double
-    /// STUB for the RED commit: never filled yet.
+    /// Busy fraction of each core of the cluster, 0...1, in `host_processor_info` order inside the
+    /// cluster (WIN-03, D-09). Empty when any core of the cluster saw no ticks: a missing value is
+    /// never a fabricated 0.
     public var coreUsage: [Double]
 
     public init(name: String, usage: Double, coreUsage: [Double] = []) {
@@ -149,7 +151,15 @@ public enum CPUMath {
             let busy = coreBusy[range.cores].reduce(0, +)
             let total = coreTotal[range.cores].reduce(0, +)
             guard total > 0 else { return [] }
-            result.append(CPUCluster(name: range.name, usage: min(1, max(0, Double(busy) / Double(total)))))
+            // One fraction per core, or none at all when any core of the range saw no ticks.
+            let perCore: [Double] =
+                range.cores.allSatisfy { coreTotal[$0] > 0 }
+                ? range.cores.map { min(1, max(0, Double(coreBusy[$0]) / Double(coreTotal[$0]))) }
+                : []
+            result.append(
+                CPUCluster(
+                    name: range.name, usage: min(1, max(0, Double(busy) / Double(total))),
+                    coreUsage: perCore))
         }
         return result
     }
