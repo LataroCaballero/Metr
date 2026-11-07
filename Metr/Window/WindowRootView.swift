@@ -110,7 +110,9 @@ struct WindowRootView: View {
             #else
             Color.clear
             #endif
-        case .memory, .disk, .network, .gpu:
+        case .gpu:
+            GPUSectionView(store: store)
+        case .memory, .disk, .network:
             // Later plans of this phase fill these sections. Until then the column stays empty.
             Color.clear
         }

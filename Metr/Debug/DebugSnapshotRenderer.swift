@@ -346,6 +346,17 @@ enum DebugSnapshotRenderer {
         /// 5 minutes of synthetic CPU history plus per-core values; false = nothing sampled yet.
         let populated: Bool
         let contentSize: NSSize
+        /// What the GPU reading looks like in this fixture.
+        var gpu: GPUFixtureState = .none
+    }
+
+    private enum GPUFixtureState {
+        /// No GPU reading is fed.
+        case none
+        /// 5 minutes of varied GPU load on an M4 chip line.
+        case live
+        /// The GPU cannot be read.
+        case unavailable
     }
 
     private static var windowFixtures: [WindowFixture] {
@@ -355,6 +366,9 @@ enum DebugSnapshotRenderer {
             WindowFixture(name: "cpu-pending", section: .cpu, populated: false, contentSize: standard),
             WindowFixture(
                 name: "cpu-min", section: .cpu, populated: true, contentSize: NSSize(width: 900, height: 520)),
+            WindowFixture(name: "gpu", section: .gpu, populated: true, contentSize: standard, gpu: .live),
+            WindowFixture(
+                name: "gpu-unavailable", section: .gpu, populated: false, contentSize: standard, gpu: .unavailable),
         ]
     }
 
@@ -368,7 +382,11 @@ enum DebugSnapshotRenderer {
             usedBytes: 12_025_908_428, totalBytes: totalMemory, swapUsedBytes: 0, freePercent: 60, pressure: .normal)
         let disk = DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)
         guard fixture.populated else {
-            store.apply(MetricsBatch(memory: .value(memory), disk: .value(disk), elapsed: 1), at: now)
+            store.apply(
+                MetricsBatch(
+                    memory: .value(memory), disk: .value(disk),
+                    gpu: fixture.gpu == .unavailable ? .unavailable : nil, elapsed: 1),
+                at: now)
             return store
         }
         let performance = [0.62, 0.41, 0.18, 0.07]
@@ -383,9 +401,14 @@ enum DebugSnapshotRenderer {
                 CPUCluster(name: "Efficiency", usage: 0.15, coreUsage: efficiency),
             ]
             let reading = CPUReading(total: user + system, user: user, system: system, clusters: clusters)
+            // Varied GPU load: a ramp, a plateau and a quiet tail, with a real zero at the start.
+            let load = max(0, min(1, 0.35 + 0.30 * sin(t / 25) + 0.15 * sin(t / 6)))
+            let gpu: Reading<GPUReading>? =
+                fixture.gpu == .live
+                ? .value(GPUReading(utilization: second < 5 ? 0 : load, chipName: "Apple M4", coreCount: 8)) : nil
             let batch = MetricsBatch(
                 cpu: .value(reading), memory: second == 299 ? .value(memory) : nil,
-                disk: second == 299 ? .value(disk) : nil, elapsed: 1)
+                disk: second == 299 ? .value(disk) : nil, gpu: gpu, elapsed: 1)
             store.apply(batch, at: now - 299 + t)
         }
         return store
@@ -449,6 +472,7 @@ enum DebugSnapshotRenderer {
     private static func detailView(for section: WindowSection, store: MetricsStore) -> some View {
         switch section {
         case .cpu: CPUSectionView(store: store)
+        case .gpu: GPUSectionView(store: store)
         default: Color.clear
         }
     }

@@ -1374,6 +1374,78 @@
           }
         }
       }
+    },
+    "How busy the GPU was recently, as the graphics driver reports it.": {
+      "comment": "GPU section: help text of the utilization number, what it measures",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cuánto trabajó la GPU recientemente, según el controlador gráfico."
+          }
+        }
+      }
+    },
+    "GPU usage isn't available on this Mac.": {
+      "comment": "GPU section: the only line shown when the GPU utilization cannot be read",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El uso de la GPU no está disponible en este Mac."
+          }
+        }
+      }
+    },
+    "%@ · %lld-core GPU": {
+      "comment": "GPU section: chip name from the system, then its GPU core count",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%@ · %lld-core GPU"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%@ · %lld-core GPU"
+                }
+              }
+            }
+          }
+        },
+        "es": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ · GPU de %2$lld núcleo"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ · GPU de %2$lld de núcleos"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$@ · GPU de %2$lld núcleos"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "version": "1.0"
