@@ -3,7 +3,7 @@
 /// window shows Processes (D-05, D-20). `gpu` is window-only (D-05): it is sampled while the window
 /// is open, whatever section it shows, so its chart keeps filling, and never otherwise.
 public enum Metric: String, Sendable, Hashable, CaseIterable {
-    case cpu, memory, disk, gpu, processes
+    case cpu, memory, disk, network, gpu, processes
 }
 
 /// Who is asking for faster sampling. Only the popover delegate registers `.panel`, and it
