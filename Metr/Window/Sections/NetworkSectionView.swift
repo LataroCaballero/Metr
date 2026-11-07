@@ -47,8 +47,41 @@ struct NetworkSectionView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // Which connection carries the traffic and how much moved since the window opened. There
+            // is no per-interface list (D-18).
+            Section {
+                LabeledContent("Connected via") {
+                    Text(verbatim: connection(reading))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                LabeledContent("Downloaded", value: total(store.networkSessionDown, reading: reading, failed: failed))
+                    .monospacedDigit()
+                LabeledContent("Uploaded", value: total(store.networkSessionUp, reading: reading, failed: failed))
+                    .monospacedDigit()
+            } footer: {
+                Text("Since you opened this window.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.secondary)
+            }
         }
         .formStyle(.grouped)
+    }
+
+    /// The name of the primary connection, "Not connected" when there is none (the rates are then
+    /// real zeros), and "—" while no reading exists yet.
+    private func connection(_ reading: NetworkReading?) -> String {
+        guard let reading else { return "—" }
+        guard reading.hasPrimary, let name = reading.primaryInterface else {
+            return String(localized: "Not connected")
+        }
+        return name
+    }
+
+    /// A session total, "—" until the first reading and when the counters cannot be read.
+    private func total(_ bytes: UInt64, reading: NetworkReading?, failed: Bool) -> String {
+        guard !failed, reading != nil || bytes > 0 else { return "—" }
+        return text.byteTotal(bytes)
     }
 }
 

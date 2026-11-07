@@ -6,8 +6,8 @@ public struct NetworkReading: Sendable, Equatable {
     /// Bytes received and sent during that same interval, for the session totals of the Network section.
     public var downBytes: UInt64
     public var upBytes: UInt64
-    /// The primary interface's name, and whether one exists. Both stay nil / false until the Network
-    /// section reads the primary interface.
+    /// The name of the connection that carries the traffic ("Wi-Fi", the service's own name, the
+    /// interface name only as a last resort), and whether a primary interface exists at all.
     public var primaryInterface: String?
     public var hasPrimary: Bool
 
@@ -44,5 +44,23 @@ public enum NetworkMath {
         let value = Double(bytes) / seconds
         guard value <= maximumBytesPerSecond else { return nil }
         return value
+    }
+}
+
+extension NetworkMath {
+    /// The longest connection name the window shows; the user chose the text, so it is capped.
+    public static let maximumNameLength = 64
+
+    /// The name of the primary connection for the window (D-18): the service's user-defined name
+    /// ("Wi-Fi", or what the user called a VPN), else the interface's localized display name, else
+    /// the BSD name ("en5") as a last fallback. Each candidate goes through `ProcessText.sanitize`
+    /// (T-03-13: control and bidirectional characters out, length capped); an empty one is skipped.
+    public static func connectionName(userDefined: String?, displayName: String?, bsdName: String?) -> String? {
+        for candidate in [userDefined, displayName, bsdName] {
+            guard let candidate else { continue }
+            let clean = ProcessText.sanitize(candidate, limit: maximumNameLength)
+            if !clean.isEmpty { return clean }
+        }
+        return nil
     }
 }

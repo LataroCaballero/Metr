@@ -18,7 +18,11 @@ import MetrCore
             #expect(reading.downBytesPerSec >= 0)
             #expect(reading.upBytesPerSec >= 0)
             #expect(reading.downBytesPerSec <= NetworkMath.maximumBytesPerSecond)
-            #expect(!reading.hasPrimary && reading.primaryInterface == nil)
+            // A primary interface always has a name, and no primary interface has none (D-18).
+            #expect(reading.hasPrimary == (reading.primaryInterface != nil))
+            if let name = reading.primaryInterface {
+                #expect(!name.isEmpty && name.count <= NetworkMath.maximumNameLength)
+            }
         case .pending, .unavailable:
             Issue.record("a second sample over a live kernel read must be a value")
         }

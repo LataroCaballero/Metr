@@ -1542,6 +1542,66 @@
           }
         }
       }
+    },
+    "Connected via": {
+      "comment": "Network section row naming the connection that carries the traffic",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conectado mediante"
+          }
+        }
+      }
+    },
+    "Not connected": {
+      "comment": "Network section value when no network interface is in use",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sin conexión"
+          }
+        }
+      }
+    },
+    "Downloaded": {
+      "comment": "Network section row: bytes received since the window opened",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descargado"
+          }
+        }
+      }
+    },
+    "Uploaded": {
+      "comment": "Network section row: bytes sent since the window opened",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Subido"
+          }
+        }
+      }
+    },
+    "Since you opened this window.": {
+      "comment": "Network section footer explaining the session totals",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desde que abriste esta ventana."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -49,4 +49,25 @@ import Testing
         #expect(NetworkMath.rate(bytes: 200_000_000_000, seconds: 1) == nil)
         #expect(NetworkMath.rate(bytes: 0, seconds: 1) == 0)
     }
+
+    // MARK: Connection name
+
+    @Test func connectionNamePrefersTheServiceThenTheDisplayNameThenTheBSDName() {
+        #expect(NetworkMath.connectionName(userDefined: "Casa", displayName: "Wi-Fi", bsdName: "en0") == "Casa")
+        #expect(NetworkMath.connectionName(userDefined: nil, displayName: "Wi-Fi", bsdName: "en0") == "Wi-Fi")
+        #expect(NetworkMath.connectionName(userDefined: nil, displayName: nil, bsdName: "en5") == "en5")
+        // An empty or all-control name is no name.
+        #expect(NetworkMath.connectionName(userDefined: "  \u{0007} ", displayName: "", bsdName: "en0") == "en0")
+        #expect(NetworkMath.connectionName(userDefined: nil, displayName: nil, bsdName: nil) == nil)
+    }
+
+    /// T-03-13: the service name is text the user typed, so controls and bidirectional overrides are
+    /// stripped and the length is capped.
+    @Test func connectionNameIsSanitized() {
+        let spoofed = "Wi\u{202E}-Fi\u{0000}\n"
+        #expect(NetworkMath.connectionName(userDefined: spoofed, displayName: nil, bsdName: nil) == "Wi-Fi")
+        let long = String(repeating: "a", count: 500)
+        let name = NetworkMath.connectionName(userDefined: long, displayName: nil, bsdName: nil)
+        #expect(name?.count == NetworkMath.maximumNameLength)
+    }
 }

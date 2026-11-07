@@ -369,8 +369,12 @@ enum DebugSnapshotRenderer {
     private enum NetworkFixtureState {
         /// No network reading is fed.
         case none
-        /// Five minutes of mirrored traffic: a download with bursts and a lighter upload.
+        /// Five minutes of mirrored traffic over Wi-Fi: a download with bursts and a lighter upload.
         case live
+        /// Five minutes of nothing, with no primary interface: "Not connected" and real zeros.
+        case idle
+        /// The long-text case: the largest hero values the window has to fit (128.4 MB/s, 999.9 kB/s).
+        case wide
     }
 
     private enum GPUFixtureState {
@@ -398,6 +402,11 @@ enum DebugSnapshotRenderer {
             WindowFixture(
                 name: "memory-pressure", section: .memory, populated: true, contentSize: standard, memory: .pressure),
             WindowFixture(name: "network", section: .network, populated: true, contentSize: standard, network: .live),
+            WindowFixture(
+                name: "network-idle", section: .network, populated: true, contentSize: standard, network: .idle),
+            WindowFixture(
+                name: "network-min", section: .network, populated: true, contentSize: NSSize(width: 900, height: 520),
+                network: .wide),
         ]
     }
 
@@ -425,15 +434,23 @@ enum DebugSnapshotRenderer {
         }
     }
 
-    /// The network reading of second `second` of a network fixture: a download with bursts and a quiet
-    /// stretch, and an upload a fraction of it, ending on 2.1 MB/s down and 120 kB/s up.
-    private static func networkReading(second: Int) -> NetworkReading {
+    /// The network reading of second `second` of a network fixture. `live`: a download with bursts and
+    /// a quiet stretch and an upload a fraction of it, ending on 2.1 MB/s down and 120 kB/s up, over
+    /// Wi-Fi. `idle`: zeros and no primary interface. `wide`: the same shape scaled to end on
+    /// 128.4 MB/s down and 999.9 kB/s up.
+    private static func networkReading(second: Int, state: NetworkFixtureState) -> NetworkReading {
+        if state == .idle {
+            return NetworkReading(downBytesPerSec: 0, upBytesPerSec: 0, downBytes: 0, upBytes: 0)
+        }
         let t = Double(second)
-        let burst = max(0, sin(t / 22)) * 3_800_000 + max(0, sin(t / 6.5)) * 900_000
-        let down = second == 299 ? 2_100_000 : 150_000 + burst
-        let up = second == 299 ? 120_000 : 40_000 + 0.18 * burst * (1 + sin(t / 9)) / 2
+        let scale = state == .wide ? 30.0 : 1.0
+        let burst = (max(0, sin(t / 22)) * 3_800_000 + max(0, sin(t / 6.5)) * 900_000) * scale
+        let last = second == 299
+        let down = last ? (state == .wide ? 128_400_000 : 2_100_000) : 150_000 * scale + burst
+        let up = last ? (state == .wide ? 999_900 : 120_000) : 40_000 + 0.18 * burst * (1 + sin(t / 9)) / 2
         return NetworkReading(
-            downBytesPerSec: down, upBytesPerSec: up, downBytes: UInt64(down), upBytes: UInt64(up))
+            downBytesPerSec: down, upBytesPerSec: up, downBytes: UInt64(down), upBytes: UInt64(up),
+            primaryInterface: "Wi-Fi", hasPrimary: true)
     }
 
     /// A store holding a fixture's own history: a window session that began 300 s ago and one
@@ -476,7 +493,7 @@ enum DebugSnapshotRenderer {
                 ? (second == 299 ? .value(memory) : nil)
                 : .value(memoryReading(second: second, state: fixture.memory))
             let network: Reading<NetworkReading>? =
-                fixture.network == .none ? nil : .value(networkReading(second: second))
+                fixture.network == .none ? nil : .value(networkReading(second: second, state: fixture.network))
             let batch = MetricsBatch(
                 cpu: .value(reading), memory: memoryBatch,
                 disk: second == 299 ? .value(disk) : nil, network: network, gpu: gpu, elapsed: 1)

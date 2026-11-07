@@ -40,6 +40,13 @@ final class MetricsStore {
     /// The network history of the open window: first = download, second = upload, both in bytes per
     /// second. A pending or failed read is a gap, never a zero.
     private(set) var networkHistory = HistoryBuffer<SeriesPair>()
+    /// Bytes received and sent since the window opened (D-18): the sum of every reading's byte
+    /// deltas, not a rate times the cadence, so they match what netstat counted. Zero outside a
+    /// window session.
+    private(set) var networkSessionDown: UInt64 = 0
+    private(set) var networkSessionUp: UInt64 = 0
+    /// Network values seen this session, to log the totals every fifth one.
+    @ObservationIgnored private var networkValuesThisSession = 0
 
     /// The system's core tiers (`hw.perflevelN`, perflevel 0 first) with their core counts, read once.
     /// Empty when the layout cannot be read. They name the cluster bars, in the panel and in the
@@ -87,6 +94,7 @@ final class MetricsStore {
     /// Starts a window session: every buffer is empty and recording begins (D-06).
     func beginWindowSession(at time: Double = Date.now.timeIntervalSinceReferenceDate) {
         clearHistory()
+        resetNetworkTotals()
         windowSessionActive = true
         windowSessionStart = time
     }
@@ -94,12 +102,23 @@ final class MetricsStore {
     /// Ends the session when the window closes: recording stops and every buffer is discarded.
     func endWindowSession() {
         clearHistory()
+        // The final totals, for scripts/verify/net-vs-netstat.sh (numbers only, T-03-40).
+        if networkValuesThisSession > 0 {
+            DebugHooks.log("net total down=\(networkSessionDown) up=\(networkSessionUp)")
+        }
+        resetNetworkTotals()
         // Window-only readings do not outlive the window (D-06).
         gpu = .pending
         network = .pending
         windowSessionActive = false
         windowSessionStart = nil
         DebugHooks.log("history cleared")
+    }
+
+    private func resetNetworkTotals() {
+        networkSessionDown = 0
+        networkSessionUp = 0
+        networkValuesThisSession = 0
     }
 
     private func clearHistory() {
@@ -148,6 +167,7 @@ final class MetricsStore {
                     time: time,
                     value: reading.value.map { SeriesPair(first: $0.downBytesPerSec, second: $0.upBytesPerSec) })
                 recorded = true
+                accumulateNetworkTotals(reading)
             }
         }
         if let reading = batch.processes {
@@ -180,6 +200,20 @@ final class MetricsStore {
         guard windowSessionActive else { return }
         let pair = reading.value.map { SeriesPair(first: $0.user, second: $0.system) }
         cpuHistory.append(time: time, value: pair)
+    }
+
+    /// Adds a value reading's interval bytes to the session totals (saturating), and logs both totals
+    /// every fifth value for scripts/verify/net-vs-netstat.sh. Numbers only, DEBUG log only (T-03-40).
+    private func accumulateNetworkTotals(_ reading: Reading<NetworkReading>) {
+        guard case .value(let value) = reading else { return }
+        networkSessionDown = networkSessionDown.addingReportingOverflow(value.downBytes).overflow
+            ? .max : networkSessionDown + value.downBytes
+        networkSessionUp = networkSessionUp.addingReportingOverflow(value.upBytes).overflow
+            ? .max : networkSessionUp + value.upBytes
+        networkValuesThisSession += 1
+        if networkValuesThisSession % 5 == 0 {
+            DebugHooks.log("net total down=\(networkSessionDown) up=\(networkSessionUp)")
+        }
     }
 
     /// Byte counts and a flag only, never an interface or service name: `net down=1200 up=300 primary=0`

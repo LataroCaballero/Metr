@@ -67,6 +67,18 @@ import Testing
         #expect(MetricText(locale: es).rate(2_100_000) == "2,1 MB/s")
     }
 
+    @Test func byteTotalsNeverSayZero() {
+        for locale in [en, es] {
+            let text = MetricText(locale: locale)
+            #expect(text.byteTotal(0) == "0 kB")
+            #expect(!text.byteTotal(0).contains("Zero"))
+            #expect(text.byteTotal(12_300_000) == text.diskBytes(12_300_000))
+            #expect(text.byteTotal(.max) == text.diskBytes(.max))
+        }
+        #expect(MetricText(locale: en).byteTotal(4_200_000_000) == "4.2 GB")
+        #expect(MetricText(locale: es).byteTotal(4_200_000_000) == "4,2 GB")
+    }
+
     @Test func processCPUIsPercentOfOneCoreInBothLocales() {
         for locale in [en, es] {
             let text = MetricText(locale: locale)

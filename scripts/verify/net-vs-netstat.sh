@@ -7,6 +7,10 @@
 # traffic; when it fails the run falls back to ambient traffic and says so. While the app runs,
 # `lsof` must show Metr holding no internet socket.
 #
+# The window closes at 12 s, and the Network section's session total ("net total down=<bytes>
+# up=<bytes>", logged when the window closes and every fifth sample) is compared with the same netstat
+# delta: Metr's own total must be within 15 % of it when netstat saw more than 5 MB downloaded.
+#
 # Tolerance: within 20 % when netstat saw more than 5 MB downloaded, else within 200 kB/s on
 # average over Metr's sampled span.
 #
@@ -45,7 +49,7 @@ read -r IN0 OUT0 <<<"$(netstat_totals)"
 T0="$(now)"
 
 bash scripts/verify/run-debug.sh "$SECS" "$NAME" \
-  --env 'METR_DEBUG_WINDOW_SCRIPT=network@1' \
+  --env 'METR_DEBUG_WINDOW_SCRIPT=network@1;close@12' \
   --expect 'net down=[0-9]+ up=[0-9]+' --min 8 \
   --args -MetrDidPresentWelcome YES >"$TMP/run.out" 2>&1 &
 RUN_PID=$!
@@ -98,12 +102,20 @@ read -r APP_IN APP_OUT SPAN COUNT <<<"$(awk '
 [[ "$COUNT" =~ ^[0-9]+$ ]] && [ "$COUNT" -ge 8 ] || fail "too few net lines in $LOG (count=$COUNT)"
 awk -v s="$SPAN" 'BEGIN { exit !(s > 0) }' || fail "Metr's sampled span is not positive (span=$SPAN)"
 
+# The session total the Network section showed: the last "net total" line (the one the closing window logs).
+TOTAL_LINE="$(grep -E ' net total down=[0-9]+ up=[0-9]+$' "$LOG" | tail -n 1 || true)"
+[ -n "$TOTAL_LINE" ] || fail "Metr logged no 'net total' line (the Network section's session totals)"
+TOTAL_DOWN="$(printf '%s' "$TOTAL_LINE" | sed -E 's/.* down=([0-9]+) up=([0-9]+)$/\1/')"
+TOTAL_UP="$(printf '%s' "$TOTAL_LINE" | sed -E 's/.* down=([0-9]+) up=([0-9]+)$/\2/')"
+[[ "$TOTAL_DOWN" =~ ^[0-9]+$ && "$TOTAL_UP" =~ ^[0-9]+$ ]] || fail "unreadable net total line: $TOTAL_LINE"
+
 NS_IN=$(( IN1 - IN0 ))
 NS_OUT=$(( OUT1 - OUT0 ))
 ELAPSED="$(awk -v a="$T0" -v b="$T1" 'BEGIN { printf "%.3f", b - a }')"
 
 APP_RATE="$(awk -v b="$APP_IN" -v s="$SPAN" 'BEGIN { printf "%.0f", b / s }')"
 NS_RATE="$(awk -v b="$NS_IN" -v s="$SPAN" 'BEGIN { printf "%.0f", b / s }')"
+echo "INFO: session_total_down=${TOTAL_DOWN} session_total_up=${TOTAL_UP}"
 echo "INFO: elapsed=${ELAPSED}s span=${SPAN}s app_down=${APP_IN} netstat_down=${NS_IN} app_up=${APP_OUT} netstat_up=${NS_OUT}"
 
 if [ "$NS_IN" -gt 5000000 ]; then
@@ -114,4 +126,13 @@ else
     || fail "download app=$APP_RATE B/s netstat=$NS_RATE B/s differ by more than 200 kB/s"
 fi
 
-echo "NET-VS-NETSTAT OK app=$APP_RATE netstat=$NS_RATE"
+# The Network section's own session totals against netstat over the same run.
+if [ "$NS_IN" -gt 5000000 ]; then
+  awk -v a="$TOTAL_DOWN" -v b="$NS_IN" 'BEGIN { d = a - b; if (d < 0) d = -d; exit !(d <= 0.15 * b) }' \
+    || fail "session total down=$TOTAL_DOWN bytes netstat=$NS_IN bytes differ by more than 15 %"
+else
+  awk -v a="$TOTAL_DOWN" -v b="$NS_IN" 'BEGIN { d = a - b; if (d < 0) d = -d; exit !(d <= 2400000) }' \
+    || fail "session total down=$TOTAL_DOWN bytes netstat=$NS_IN bytes differ by more than 2.4 MB"
+fi
+
+echo "NET-VS-NETSTAT OK app=$APP_RATE netstat=$NS_RATE total=$TOTAL_DOWN"

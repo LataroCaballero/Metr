@@ -57,6 +57,14 @@ public struct MetricText: Sendable {
         return bytes.formatted(rateStyle.locale(locale)) + "/s"
     }
 
+    /// A byte total in Finder's decimal style ("4.2 GB"), with a total of nothing written "0 kB": the
+    /// formatter alone says "Zero kB" in English, which is never shown (the Network session totals
+    /// start at nothing every time the window opens).
+    public func byteTotal(_ bytes: UInt64) -> String {
+        guard bytes > 0 else { return zeroBytes() }
+        return diskBytes(Int64(clamping: bytes))
+    }
+
     private var rateStyle: ByteCountFormatStyle {
         .byteCount(style: .file, allowedUnits: [.kb, .mb, .gb])
     }
@@ -64,10 +72,14 @@ public struct MetricText: Sendable {
     /// "0 kB" built from how the formatter writes one kilobyte, so the digit, the separator and the
     /// kilobyte symbol all come from the system in the pinned locale.
     private func zeroRate() -> String {
+        zeroBytes() + "/s"
+    }
+
+    private func zeroBytes() -> String {
         let one = Int64(1000).formatted(
             ByteCountFormatStyle(style: .file, allowedUnits: [.kb]).locale(locale))
         let digitOne = 1.formatted(.number.locale(locale))
         let digitZero = 0.formatted(.number.locale(locale))
-        return one.replacingOccurrences(of: digitOne, with: digitZero) + "/s"
+        return one.replacingOccurrences(of: digitOne, with: digitZero)
     }
 }
