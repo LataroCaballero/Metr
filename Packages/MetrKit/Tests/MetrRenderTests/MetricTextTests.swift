@@ -49,6 +49,24 @@ import Testing
         #expect(MetricText(locale: en).diskBytes(bytes).contains("210"))
     }
 
+    /// Rates are decimal bytes per second in the system formatter's own units (Pitfall 14, owner
+    /// decision 2026-11-02): "kB/s" with a lowercase k, and zero reads "0 kB/s", never "Zero kB/s".
+    @Test func rateFormats() {
+        for locale in [en, es] {
+            let text = MetricText(locale: locale)
+            let expected =
+                Int64(2_100_000).formatted(.byteCount(style: .file, allowedUnits: [.kb, .mb, .gb]).locale(locale))
+                + "/s"
+            #expect(text.rate(2_100_000) == expected)
+            #expect(text.rate(0) == "0 kB/s")
+            #expect(!text.rate(0).contains("Zero"))
+            #expect(text.rate(0.4) == "0 kB/s")
+            #expect(text.rate(nil) == "\u{2014}")
+        }
+        #expect(MetricText(locale: en).rate(2_100_000) == "2.1 MB/s")
+        #expect(MetricText(locale: es).rate(2_100_000) == "2,1 MB/s")
+    }
+
     @Test func processCPUIsPercentOfOneCoreInBothLocales() {
         for locale in [en, es] {
             let text = MetricText(locale: locale)

@@ -44,4 +44,7 @@ public struct MetricText: Sendable {
     public func diskBytes(_ bytes: Int64) -> String {
         bytes.formatted(.byteCount(style: .file).locale(locale))
     }
+
+    /// STUB for the RED step.
+    public func rate(_ bytesPerSecond: Double?) -> String { "" }
 }

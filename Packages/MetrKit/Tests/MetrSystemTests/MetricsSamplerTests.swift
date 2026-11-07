@@ -80,6 +80,41 @@ private func waitForTopChild(_ sampler: MetricsSampler, present: Bool, timeoutMs
         #expect(cpuAfter.dropFirst().contains { $0.value != nil }, "no priming value after the baseline")
     }
 
+    /// Wake policy (CLAUDE.md "Wake/sleep"): every delta baseline resets on a real wake through
+    /// `onBaseline`, so the first network rate after the wake is measured from a post-wake baseline and no
+    /// rate spans the sleep. A resume that does not re-prime keeps the baseline (WR-04): no time was
+    /// suspended. Fails if `network.resetBaseline()` is missing from `onBaseline`.
+    @Test func realWakeRebaselinesTheNetwork() async throws {
+        let sampler = MetricsSampler(cadenceScale: 0.05)
+        let recorder = BatchRecorder()
+        sampler.start(onBatch: { recorder.add($0) })
+        sampler.register(.window)
+        try await sleep(300)
+        #expect(
+            recorder.batches.contains { $0.network?.value != nil },
+            "no network value arrived while the window was open")
+
+        sampler.suspend(reason: .systemSleep)
+        try await sleep(150)
+        let countBefore = recorder.batches.count
+        sampler.resume(reason: .systemSleep)
+        try await sleep(300)
+
+        let afterWake = Array(recorder.batches.dropFirst(countBefore).compactMap(\.network))
+        let first = try #require(afterWake.first, "no network batch after the wake")
+        #expect(isPending(first), "the first network batch after a real wake must be pending, not a rate across the sleep")
+        #expect(afterWake.dropFirst().contains { $0.value != nil }, "no network value after the post-wake baseline")
+
+        // A resume with no matching suspend keeps the baseline (WR-04): no pending batch follows.
+        let countBeforeSpurious = recorder.batches.count
+        sampler.resume(reason: .sessionInactive)
+        try await sleep(300)
+        sampler.stop()
+        let afterSpurious = recorder.batches.dropFirst(countBeforeSpurious).compactMap(\.network)
+        #expect(afterSpurious.count >= 2, "network batches after the spurious resume: \(afterSpurious.count)")
+        #expect(!afterSpurious.contains(where: isPending), "a spurious resume re-took the network baseline")
+    }
+
     /// D-20: closing the last consumer returns the store's processes to pending and stops reading.
     @Test func cancellingTheLastDemandEmitsPendingProcesses() async throws {
         let sampler = MetricsSampler(cadenceScale: 0.05)
