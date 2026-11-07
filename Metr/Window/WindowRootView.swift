@@ -96,7 +96,17 @@ struct WindowRootView: View {
         switch model.section {
         case .cpu:
             CPUHeroView(store: store)
-        case .memory, .disk, .network, .gpu, .processes:
+        case .processes:
+            #if DEBUG
+            if DebugHooks.chromeProbeEnabled {
+                ChromeProbeView()
+            } else {
+                Color.clear
+            }
+            #else
+            Color.clear
+            #endif
+        case .memory, .disk, .network, .gpu:
             // Later plans of this phase fill these sections. Until then the column stays empty.
             Color.clear
         }
@@ -163,3 +173,25 @@ private struct CPUHeroView: View {
         .formStyle(.grouped)
     }
 }
+
+#if DEBUG
+/// DEBUG only: the toolbar search field and toolbar menu that Processes will carry (03-12), so the
+/// chrome probe can check that the AppKit host bridges them (RESEARCH Open Question 2).
+private struct ChromeProbeView: View {
+    @State private var query = ""
+
+    var body: some View {
+        Color.clear
+            .searchable(text: $query, placement: .toolbar)
+            .toolbar {
+                ToolbarItem {
+                    Menu {
+                        Button("Close") {}
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                    }
+                }
+            }
+    }
+}
+#endif

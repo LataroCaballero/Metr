@@ -146,6 +146,61 @@ final class WindowController: NSWindowController, NSWindowDelegate {
                         + " active=\(NSApp.isActive ? 1 : 0) policy=\(policy)")
             }
         }
+        // The main menu and (on request) the toolbar, half a second after the window shows.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.logMenuProbe()
+                if DebugHooks.chromeProbeEnabled, self?.model.section == .processes {
+                    self?.logChromeProbe(window)
+                }
+            }
+        }
         #endif
     }
+
+    #if DEBUG
+    /// Counts the Command-key items of the main menu, recursively: Settings (","), Close ("w"),
+    /// Window > Metr ("0") and the six View sections ("1" to "6"). Exactly one Close and one Metr
+    /// must exist, and no Settings (RESEARCH Pitfall 3, assumption A3).
+    private func logMenuProbe() {
+        var settings = 0, close = 0, metr = 0, sections = 0
+        func walk(_ menu: NSMenu) {
+            for item in menu.items {
+                if item.keyEquivalentModifierMask == .command {
+                    switch item.keyEquivalent {
+                    case ",": settings += 1
+                    case "w": close += 1
+                    case "0": metr += 1
+                    case "1", "2", "3", "4", "5", "6": sections += 1
+                    default: break
+                    }
+                }
+                if let submenu = item.submenu { walk(submenu) }
+            }
+        }
+        if let main = NSApp.mainMenu { walk(main) }
+        DebugHooks.log("menu settings=\(settings) close=\(close) metr=\(metr) sections=\(sections)")
+    }
+
+    /// What the AppKit host bridged from the SwiftUI content: the toolbar, its search field and its menu
+    /// (the execution-time gate of the owner-approved host, RESEARCH Open Question 2, assumption A1).
+    private func logChromeProbe(_ window: NSWindow) {
+        let items = window.toolbar?.items ?? []
+        let search = items.contains { $0 is NSSearchToolbarItem }
+        let menu = items.contains { item in
+            item is NSMenuToolbarItem || item.view is NSPopUpButton || (item.view as? NSButton)?.menu != nil
+                // SwiftUI bridges a toolbar Menu as a toolbar item whose menu form is a submenu.
+                || item.menuFormRepresentation?.submenu != nil
+        }
+        DebugHooks.log(
+            "chrome toolbar=\(window.toolbar == nil ? 0 : 1) items=\(items.count)"
+                + " search=\(search ? 1 : 0) menu=\(menu ? 1 : 0)"
+                + " style=\(window.toolbarStyle.rawValue)")
+        DebugHooks.log(
+            "chrome classes=" + items.map {
+                "\(type(of: $0))[view=\($0.view.map { String(describing: type(of: $0)) } ?? "nil"),"
+                    + "menu=\($0.menuFormRepresentation?.submenu == nil ? 0 : 1)]"
+            }.joined(separator: ","))
+    }
+    #endif
 }

@@ -1039,6 +1039,42 @@
         }
       }
     },
+    "Open Window": {
+      "comment": "Right-click menu item and main-menu name for opening the Metr window",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir ventana"
+          }
+        }
+      }
+    },
+    "Metr": {
+      "comment": "Window menu item that brings the Metr window forward",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metr"
+          }
+        }
+      }
+    },
+    "Close": {
+      "comment": "File menu item that closes the Metr window",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cerrar"
+          }
+        }
+      }
+    },
     "Open Metr": {
       "comment": "Panel footer button that opens the Metr window (PANEL-06)",
       "extractionState": "manual",

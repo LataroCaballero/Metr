@@ -249,6 +249,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
         RightClickMenu.showAbout()
     }
 
+    @objc func openWindow(_ sender: Any?) {
+        openWindow?(.lastVisited)
+    }
+
     // MARK: NSMenuDelegate
 
     func menuDidClose(_ menu: NSMenu) {
