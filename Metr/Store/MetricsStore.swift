@@ -20,6 +20,9 @@ final class MetricsStore {
     /// The GPU (GPU-01), sampled only while the window is open. `.pending` until the first reading
     /// and again after the window closes, so a reopened window never shows a stale value.
     private(set) var gpu: Reading<GPUReading> = .pending
+    /// Every real local and external volume, one entry per container (DISK-01), read only while the
+    /// window is open. `.pending` until the first reading and again after the window closes.
+    private(set) var volumes: Reading<[VolumeInfo]> = .pending
     /// Disk tint with its 1-point hysteresis (D-03). One state shared by the glyph and the panel.
     private(set) var diskTint: RingTint = .none
 
@@ -110,6 +113,7 @@ final class MetricsStore {
         // Window-only readings do not outlive the window (D-06).
         gpu = .pending
         network = .pending
+        volumes = .pending
         windowSessionActive = false
         windowSessionStart = nil
         DebugHooks.log("history cleared")
@@ -183,6 +187,10 @@ final class MetricsStore {
                 recorded = true
             }
         }
+        if let reading = batch.volumes {
+            volumes = reading
+            for line in Self.describe(volumes: reading) { DebugHooks.log(line) }
+        }
         if recorded, windowSessionActive {
             // Counts only (T-03-07).
             DebugHooks.log(
@@ -225,6 +233,29 @@ final class MetricsStore {
         case .value(let value):
             return "net down=\(Int64(value.downBytesPerSec.rounded())) up=\(Int64(value.upBytesPerSec.rounded()))"
                 + " primary=\(value.hasPrimary ? 1 : 0)"
+        }
+    }
+
+    /// Roles, counts and byte figures only, never a volume name or a mount path (T-03-19):
+    /// `volumes n=2 startup=1 internal=0 external=1`, then `volume role=startup total=245107195904 free=11504558144`
+    /// per row (`-` for a figure the volume did not report), or the pending / unavailable word.
+    /// DEBUG log only.
+    private static func describe(volumes reading: Reading<[VolumeInfo]>) -> [String] {
+        switch reading {
+        case .pending: return ["volumes pending"]
+        case .unavailable: return ["volumes unavailable"]
+        case .value(let rows):
+            func count(_ role: VolumeRole) -> Int { rows.filter { $0.role == role }.count }
+            var lines = [
+                "volumes n=\(rows.count) startup=\(count(.startup)) internal=\(count(.internal))"
+                    + " external=\(count(.external))"
+            ]
+            for row in rows {
+                let total = row.totalBytes.map { String($0) } ?? "-"
+                let free = row.freeBytes.map { String($0) } ?? "-"
+                lines.append("volume role=\(row.role.rawValue) total=\(total) free=\(free)")
+            }
+            return lines
         }
     }
 

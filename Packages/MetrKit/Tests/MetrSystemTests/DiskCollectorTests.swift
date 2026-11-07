@@ -33,6 +33,10 @@ import Testing
     /// CR-01: Foundation caches resource values per URL instance, and the sampler queue has no
     /// run loop to flush them. One long-lived collector must still see free space change.
     @Test func repeatedSamplesOnOneCollectorSeeAFileAllocation() throws {
+        try FreeSpaceLock.exclusive { try seeAFileAllocation() }
+    }
+
+    private func seeAFileAllocation() throws {
         let directory = FileManager.default.temporaryDirectory
         let collector = DiskCollector(volume: directory)
         let before = try #require(collector.sample().value)

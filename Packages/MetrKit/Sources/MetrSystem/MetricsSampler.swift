@@ -7,7 +7,7 @@ import MetrCore
 /// values to a `@Sendable` sink.
 public final class MetricsSampler: @unchecked Sendable {
     /// Metrics this build has collectors for.
-    private static let supported: Set<Metric> = [.cpu, .memory, .disk, .network, .gpu, .processes]
+    private static let supported: Set<Metric> = [.cpu, .memory, .disk, .network, .gpu, .volumes, .processes]
 
     private let queue = DispatchQueue(label: "Metr.sampler", qos: .utility)
     private let scheduler: SamplingScheduler
@@ -16,6 +16,7 @@ public final class MetricsSampler: @unchecked Sendable {
     private let disk = DiskCollector()  // confined to `queue`
     private let network = NetworkCollector()  // confined to `queue`; reads the kernel's counters only while the window is open
     private let gpu = GPUCollector()  // confined to `queue`; touches IOKit only while the window is open
+    private let volumes = VolumeCollector()  // confined to `queue`; reads the mounts only while the window is open
     private let processes: ProcessCollector  // confined to `queue`
     /// The one top child behind the process list. Started by the collector on the first process
     /// sample and stopped by its `reset()`, so it exists only while the panel is open or the window shows Processes.
@@ -71,6 +72,7 @@ public final class MetricsSampler: @unchecked Sendable {
                 if sampled.contains(.disk) { batch.disk = disk.sample() }
                 if sampled.contains(.network) { batch.network = network.sample() }
                 if sampled.contains(.gpu) { batch.gpu = gpu.sample() }
+                if sampled.contains(.volumes) { batch.volumes = volumes.sample() }
                 if sampled.contains(.processes) { batch.processes = processes.sample() }
                 onBatch(batch)
             },
@@ -110,10 +112,12 @@ public final class MetricsSampler: @unchecked Sendable {
                 }
                 if SamplingPlan.carriesWindow(before) && !SamplingPlan.carriesWindow(self.registry.active) {
                     // Window-only metrics are never left stale: the window tier ended, so the store
-                    // gets pending GPU and network readings and a reopened window starts from nothing.
-                    // The network baseline goes too, so the first rate after a reopen is measured afresh.
+                    // gets pending GPU, network and volume readings and a reopened window starts from
+                    // nothing. The network baseline goes too, so the first rate after a reopen is
+                    // measured afresh, and the DiskArbitration session is dropped.
                     self.network.resetBaseline()
-                    self.emit?(MetricsBatch(network: .pending, gpu: .pending, elapsed: 0))
+                    self.volumes.reset()
+                    self.emit?(MetricsBatch(network: .pending, gpu: .pending, volumes: .pending, elapsed: 0))
                 }
                 self.scheduler.setDemand(self.registry.active)
             }
