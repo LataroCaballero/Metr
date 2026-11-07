@@ -21,6 +21,11 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     private let sampler: MetricsSampler
     private let model: WindowModel
     private let closePanel: () -> Void
+    /// True from the first `show` until the window closes. The demand follows this, not
+    /// `model.isOpen`, because the demand must be in place before the panel closes.
+    private var isShown = false
+    /// What this controller has registered with the sampler right now.
+    private var activeDemand: Set<DemandConsumer> = []
 
     #if DEBUG
     /// Lets the DEBUG log say whether the hosting controller was released after the close.
@@ -33,6 +38,9 @@ final class WindowController: NSWindowController, NSWindowDelegate {
         self.model = model
         self.closePanel = closePanel
         super.init(window: nil)
+        model.onSectionChange = { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyDemand() }
+        }
     }
 
     @available(*, unavailable)
@@ -42,9 +50,12 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     ///
     /// Order matters (RESEARCH Pattern 1, Pitfall 1): the window's demand is registered BEFORE the
     /// panel closes, so the demand registry never empties in between and the process baseline the
-    /// panel built is not thrown away.
+    /// panel built is not thrown away. When the route lands on Processes the process pass is
+    /// registered in the same step, so the panel's top child carries straight over.
     func show(_ route: WindowRoute) {
-        sampler.register(.window)
+        isShown = true
+        model.section = resolve(route)
+        applyDemand()
         closePanel()
 
         let window = existingOrNewWindow()
@@ -62,13 +73,33 @@ final class WindowController: NSWindowController, NSWindowDelegate {
             #endif
             model.setOpen(true)
         }
-        model.section = resolve(route)
 
         NSApp.activate()
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
         logShown(window)
     }
+
+    /// Moves the sampler's demand to what the window needs now (D-05): the cheap metrics while the
+    /// window is open, plus the process pass only while Processes is selected and the window is not
+    /// minimized. A covered or hidden window counts as visible: Metr does not observe the window's
+    /// occlusion (owner decision of 2026-11-02, CLAUDE.md). Every new consumer is registered BEFORE
+    /// a dropped one is cancelled, so the registry never empties during a switch.
+    private func applyDemand() {
+        let target: Set<DemandConsumer> =
+            isShown ? WindowDemand.consumers(section: model.section, processesVisible: !isMinimized) : []
+        let change = WindowDemand.transition(from: activeDemand, to: target)
+        guard !change.register.isEmpty || !change.cancel.isEmpty else { return }
+        for consumer in change.register { sampler.register(consumer) }
+        for consumer in change.cancel { sampler.cancel(consumer) }
+        activeDemand = target
+        #if DEBUG
+        let list = target.map(\.rawValue).sorted().joined(separator: ",")
+        DebugHooks.log("window demand=\(list.isEmpty ? "none" : list)")
+        #endif
+    }
+
+    private var isMinimized: Bool { window?.isMiniaturized ?? false }
 
     /// Closes the window the way the red button does, so the same delegate path runs.
     func closeWindow() {
@@ -110,7 +141,8 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     // MARK: NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
-        sampler.cancel(.window)
+        isShown = false
+        applyDemand()
         // A hosting controller left on a closed window keeps observing the store (FND-03).
         window?.contentViewController = nil
         model.setOpen(false)

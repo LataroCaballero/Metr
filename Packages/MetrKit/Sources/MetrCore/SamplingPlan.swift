@@ -1,12 +1,16 @@
 /// A metric the sampler can collect on its own cadence. `processes` is last, so the log order
-/// stays cpu,memory,disk,processes. It exists only in the panel and window cadences (D-20).
+/// stays cpu,memory,disk,processes. It exists only while the panel is open or the window shows
+/// Processes (D-05, D-20); the window's other sections sample only cpu, memory and disk.
 public enum Metric: String, Sendable, Hashable, CaseIterable {
     case cpu, memory, disk, processes
 }
 
-/// Who is asking for faster sampling. Only the popover delegate registers `.panel`;
-/// `.window` is reserved for Phase 3 and is not registered by anything yet. Either one also
-/// switches the process list on; with neither, no process is read at all.
+/// Who is asking for faster sampling. Only the popover delegate registers `.panel`, and it
+/// switches the process list on. `.window` is registered by WindowController while the window is
+/// open and samples the cheap metrics at the window cadence. `.windowProcesses` is registered
+/// by WindowController only while Processes is the selected section and the window is not
+/// minimized (D-05 and the owner's visibility decision of 2026-11-02: no occlusion gating);
+/// it switches the process list on. With no process consumer, no process is read at all.
 public enum DemandConsumer: String, Sendable, Hashable {
     case panel, window, windowProcesses
 }
@@ -66,8 +70,9 @@ public struct SamplingPlan: Sendable, Equatable {
         let disk: Double
         let base: Double
         let processes: Double?
-        if demand.contains(.window) {
-            (tier, fast, disk, base, processes) = (.window, windowCPUMemory, windowDisk, 1, windowProcesses)
+        if carriesWindow(demand) {
+            (tier, fast, disk, base) = (.window, windowCPUMemory, windowDisk, 1)
+            processes = carriesProcesses(demand) ? windowProcesses : nil
         } else if demand.contains(.panel) {
             (tier, fast, disk, base, processes) = (.panel, panelCPUMemory, panelDisk, 1, panelProcesses)
         } else {
@@ -84,9 +89,15 @@ public struct SamplingPlan: Sendable, Equatable {
             cadenceScale: scale)
     }
 
-    // RED stubs: replaced in the GREEN commit.
-    public static func carriesProcesses(_ demand: Set<DemandConsumer>) -> Bool { false }
-    public static func carriesWindow(_ demand: Set<DemandConsumer>) -> Bool { false }
+    /// True when the demand wants the process list: the panel, or the window showing Processes.
+    public static func carriesProcesses(_ demand: Set<DemandConsumer>) -> Bool {
+        demand.contains(.panel) || demand.contains(.windowProcesses)
+    }
+
+    /// True when the window tier applies: the window is open, whatever section it shows.
+    public static func carriesWindow(_ demand: Set<DemandConsumer>) -> Bool {
+        demand.contains(.window) || demand.contains(.windowProcesses)
+    }
 
     /// Metrics whose last sample is old enough. Timer jitter is absorbed by treating a metric
     /// as due a quarter of the base interval early; CPU additionally needs a minimum window.

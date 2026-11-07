@@ -16,7 +16,7 @@ public final class MetricsSampler: @unchecked Sendable {
     private let disk = DiskCollector()  // confined to `queue`
     private let processes: ProcessCollector  // confined to `queue`
     /// The one top child behind the process list. Started by the collector on the first process
-    /// sample and stopped by its `reset()`, so it exists only while the panel or window is open.
+    /// sample and stopped by its `reset()`, so it exists only while the panel is open or the window shows Processes.
     private let topStream: TopStream
     private var registry = DemandRegistry()  // confined to `queue`
     private var diagnostics: (@Sendable (String) -> Void)?  // confined to `queue`
@@ -91,11 +91,13 @@ public final class MetricsSampler: @unchecked Sendable {
 
     public func cancel(_ consumer: DemandConsumer) {
         queue.async {
+            let before = self.registry.active
             if self.registry.cancel(consumer) {
-                if self.registry.active.isEmpty {
-                    // Nothing wants processes any more (D-20): drop the baselines and hand the
-                    // store a pending reading, so a later open never shows stale numbers. Both
-                    // run on this serial queue, ahead of any later baseline.
+                if SamplingPlan.carriesProcesses(before) && !SamplingPlan.carriesProcesses(self.registry.active) {
+                    // Nothing wants processes any more (D-20), even if the window stays registered
+                    // on another section (RESEARCH Pitfall 4): drop the baselines, which stops the
+                    // top child, and hand the store a pending reading, so a later open never shows
+                    // stale numbers. Both run on this serial queue, ahead of any later baseline.
                     self.processes.reset()
                     self.emit?(MetricsBatch(processes: .pending, elapsed: 0))
                 }

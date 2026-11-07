@@ -173,7 +173,9 @@ struct QuitIntegrationTests {
         let entries = try #require(sources.listAll())
         let daemon = try #require(
             entries.first {
-                $0.uid == 0 && $0.identity.pid > 1
+                // The sampler tests start top children in parallel. top is setuid root but keeps the
+                // user's real uid, so it is signalable and is not a daemon.
+                $0.uid == 0 && $0.identity.pid > 1 && $0.command != "top"
                     && !(sources.path($0.identity.pid).map { ProcessClassifier.protectedPaths.contains($0) } ?? false)
                     && ProcessLookup.live($0.identity.pid) != nil
             })
