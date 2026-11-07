@@ -103,6 +103,15 @@ private struct MemoryRun: Identifiable {
     let area: Color
     let line: Color
 
+    /// The colour of a level for the readout's swatch: the line colour of its runs.
+    static func swatch(_ pressure: MemoryPressure, tone: ChartTone) -> Color {
+        switch pressure {
+        case .normal: tone.colorA
+        case .warn: Color(nsColor: TintPalette.elevated)
+        case .critical: Color(nsColor: TintPalette.critical)
+        }
+    }
+
     /// Normal keeps the neutral series A and a primary line; Elevated and Critical use the single
     /// palette definition at 0.55 with a full-strength line (UI-SPEC "Chart and bar tones").
     init(id: Int, points: [Point], pressure: MemoryPressure, tone: ChartTone) {
@@ -128,8 +137,14 @@ private struct MemoryHistoryChart: View {
     let store: MetricsStore
     let tone: ChartTone
 
+    private let text = MetricText(locale: .current)
+    /// The pointer's position over the plot, nil while it is away (the hover readout).
+    @State private var selection: Date? = initialChartSelection()
+    /// The history as it was when the pointer entered; see `CPUHistoryChart`.
+    @State private var frozen: HistoryBuffer<MemoryHistoryValue>?
+
     var body: some View {
-        let history = store.memoryHistory
+        let history = frozen ?? store.memoryHistory
         // A pending or failed sample is a gap, never a plotted zero. A new pressure level begins a
         // new run on the previous run's last sample, so the tinted segments touch (WIN-02).
         let runs: [MemoryRun] = ChartSegments.runs(history.samples, maxGap: 3.5, key: { $0.pressure }).map { run in
@@ -147,6 +162,11 @@ private struct MemoryHistoryChart: View {
         let singles = runs.filter { $0.points.count == 1 }
         let end = HistoryChartTime.date(
             history.latestTime ?? store.windowSessionStart ?? Date.now.timeIntervalSinceReferenceDate)
+
+        // The readout names the pressure level, as the hero does; the swatch carries its tint.
+        let readouts = ChartHoverReadout.at(selection, in: history.samples) { value in
+            [.init(id: 0, swatch: MemoryRun.swatch(value.pressure, tone: tone), text: MemorySectionView.word(value.pressure))]
+        }
 
         return Chart {
             ForEach(runs) { run in
@@ -174,11 +194,22 @@ private struct MemoryHistoryChart: View {
                         .foregroundStyle(run.line)
                 }
             }
+            ChartReadoutRule(readouts: readouts, tone: tone)
         }
         // Gridlines at 0 / 50 / 100 with the labels hidden: the figure is a kernel free-percentage
         // inverse, not a number the user can check; the hero word is the reading.
-        .historyChart(end: end, yDomain: 0...1, yTicks: [0, 0.5, 1]) { _ in nil }
-        // The hero word and sentence carry the same information for VoiceOver.
-        .accessibilityHidden(true)
+        .historyChart(end: end, yDomain: 0...1, yTicks: [0, 0.5, 1], selection: $selection) { _ in nil }
+        .onChange(of: selection) { _, new in
+            frozen = new == nil ? nil : (frozen ?? store.memoryHistory)
+        }
+        .onDisappear {
+            selection = nil
+            frozen = nil
+        }
+        // VoiceOver hears the same ring signal the panel's ring shows, as a percent.
+        .chartAccessibility(
+            metric: String(localized: "Memory"), summary: ChartSummary.make(history.samples.map { $0.value?.fill }),
+            series: [history.descriptorSeries(named: String(localized: "Memory")) { $0.fill }],
+            format: { text.percent($0) })
     }
 }

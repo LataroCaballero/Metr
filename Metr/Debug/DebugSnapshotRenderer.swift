@@ -350,6 +350,9 @@ enum DebugSnapshotRenderer {
         var gpu: GPUFixtureState = .none
         /// What the memory history looks like in this fixture.
         var memory: MemoryFixtureState = .lastOnly
+        /// A preset hover position, in seconds before the newest sample: the readout is drawn as if
+        /// the pointer rested there. nil = no pointer.
+        var hoverSecondsAgo: Double?
     }
 
     private enum MemoryFixtureState {
@@ -380,6 +383,8 @@ enum DebugSnapshotRenderer {
             WindowFixture(name: "gpu", section: .gpu, populated: true, contentSize: standard, gpu: .live),
             WindowFixture(
                 name: "gpu-unavailable", section: .gpu, populated: false, contentSize: standard, gpu: .unavailable),
+            // The hover readout over the stacked CPU chart, with the pointer in the middle of the plot.
+            WindowFixture(name: "cpu-readout", section: .cpu, populated: true, contentSize: standard, hoverSecondsAgo: 150),
             WindowFixture(name: "memory", section: .memory, populated: true, contentSize: standard, memory: .steady),
             WindowFixture(
                 name: "memory-pressure", section: .memory, populated: true, contentSize: standard, memory: .pressure),
@@ -476,6 +481,9 @@ enum DebugSnapshotRenderer {
                 let store = windowStore(for: fixture)
                 let size = NSSize(
                     width: fixture.contentSize.width - sidebarWidth, height: fixture.contentSize.height)
+                DebugChartHover.preset = fixture.hoverSecondsAgo.map {
+                    HistoryChartTime.date(Date.now.timeIntervalSinceReferenceDate - $0)
+                }
                 let content = detailView(for: fixture.section, store: store)
                     .frame(width: size.width, height: size.height)
                     .background(Color(nsColor: .windowBackgroundColor))
@@ -505,6 +513,7 @@ enum DebugSnapshotRenderer {
                     count += 1
                 }
                 window.close()
+                DebugChartHover.preset = nil
             }
         }
         return count

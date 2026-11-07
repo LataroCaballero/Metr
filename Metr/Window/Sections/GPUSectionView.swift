@@ -90,8 +90,13 @@ private struct GPUHistoryChart: View {
     let tone: ChartTone
     let text: MetricText
 
+    /// The pointer's position over the plot, nil while it is away (the hover readout).
+    @State private var selection: Date? = initialChartSelection()
+    /// The history as it was when the pointer entered; see `CPUHistoryChart`.
+    @State private var frozen: HistoryBuffer<Double>?
+
     var body: some View {
-        let history = store.gpuHistory
+        let history = frozen ?? store.gpuHistory
         // A pending or failed sample is a gap, never a plotted zero.
         let runs: [GPURun] = ChartSegments.runs(history.samples, maxGap: 3.5).map { run in
             GPURun(
@@ -107,6 +112,10 @@ private struct GPUHistoryChart: View {
         let singles = runs.filter { $0.points.count == 1 }
         let end = HistoryChartTime.date(
             history.latestTime ?? store.windowSessionStart ?? Date.now.timeIntervalSinceReferenceDate)
+
+        let readouts = ChartHoverReadout.at(selection, in: history.samples) { value in
+            [.init(id: 0, swatch: tone.colorA, text: text.percent(value))]
+        }
 
         return Chart {
             ForEach(runs) { run in
@@ -133,11 +142,21 @@ private struct GPUHistoryChart: View {
                         .foregroundStyle(tone.colorLine)
                 }
             }
+            ChartReadoutRule(readouts: readouts, tone: tone)
         }
-        .historyChart(end: end, yDomain: 0...1, yTicks: [0, 0.5, 1]) { tick in
+        .historyChart(end: end, yDomain: 0...1, yTicks: [0, 0.5, 1], selection: $selection) { tick in
             text.percent(tick)
         }
-        // The hero carries the same information for VoiceOver.
-        .accessibilityHidden(true)
+        .onChange(of: selection) { _, new in
+            frozen = new == nil ? nil : (frozen ?? store.gpuHistory)
+        }
+        .onDisappear {
+            selection = nil
+            frozen = nil
+        }
+        .chartAccessibility(
+            metric: String(localized: "GPU"), summary: ChartSummary.make(history.samples.map(\.value)),
+            series: [history.descriptorSeries(named: String(localized: "GPU")) { $0 }],
+            format: { text.percent($0) })
     }
 }

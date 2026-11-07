@@ -172,8 +172,17 @@ public enum ChartReadout {
     public static func nearest<Value: Sendable & Equatable>(
         time: Double, in samples: [HistorySample<Value>]
     ) -> HistorySample<Value>? {
-        // RED stub: compiles, behaves wrongly until the GREEN commit.
-        nil
+        var best: HistorySample<Value>?
+        var bestDistance = Double.infinity
+        // Samples arrive in time order, so a strict comparison keeps the earlier one on a tie.
+        for sample in samples where sample.value != nil {
+            let distance = abs(sample.time - time)
+            if distance < bestDistance {
+                best = sample
+                bestDistance = distance
+            }
+        }
+        return best
     }
 }
 
@@ -194,7 +203,19 @@ public struct ChartSummary: Sendable, Equatable {
 
     /// Over the present values, in order; the latest present value is `now`. nil when there is none.
     public static func make(_ values: [Double?]) -> ChartSummary? {
-        // RED stub: compiles, behaves wrongly until the GREEN commit.
-        nil
+        var latest: Double?
+        var lowest = Double.infinity
+        var highest = -Double.infinity
+        var sum = 0.0
+        var count = 0
+        for case let value? in values {
+            latest = value
+            lowest = min(lowest, value)
+            highest = max(highest, value)
+            sum += value
+            count += 1
+        }
+        guard let latest, count > 0 else { return nil }
+        return ChartSummary(now: latest, lowest: lowest, highest: highest, average: sum / Double(count))
     }
 }

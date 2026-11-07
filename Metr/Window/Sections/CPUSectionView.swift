@@ -194,8 +194,14 @@ private struct CPUHistoryChart: View {
     let tone: ChartTone
     let text: MetricText
 
+    /// The pointer's position over the plot, nil while it is away (the hover readout).
+    @State private var selection: Date? = initialChartSelection()
+    /// The history as it was when the pointer entered: while the pointer is over the chart the plot
+    /// and its domain hold still so the readout does not drift. The hero numbers keep updating.
+    @State private var frozen: HistoryBuffer<SeriesPair>?
+
     var body: some View {
-        let history = store.cpuHistory
+        let history = frozen ?? store.cpuHistory
         // A pending or failed sample is a gap (a break between runs), never a plotted zero. The gap
         // limit lets one missed tick pass but splits at a sleep.
         let runs: [CPURun] = ChartSegments.runs(history.samples, maxGap: 3.5).map { run in
@@ -216,6 +222,17 @@ private struct CPUHistoryChart: View {
         // empty axes draw at open and the plot moves only when data arrives.
         let end = HistoryChartTime.date(
             history.latestTime ?? store.windowSessionStart ?? Date.now.timeIntervalSinceReferenceDate)
+
+        let readouts = ChartHoverReadout.at(selection, in: history.samples) { value in
+            [
+                .init(
+                    id: 0, swatch: tone.colorA,
+                    text: "\(String(localized: "User")) \(text.percent(value.first))"),
+                .init(
+                    id: 1, swatch: tone.colorB,
+                    text: "\(String(localized: "System")) \(text.percent(value.second))"),
+            ]
+        }
 
         return Chart {
             ForEach(runs) { run in
@@ -248,12 +265,26 @@ private struct CPUHistoryChart: View {
                         .foregroundStyle(tone.colorLine)
                 }
             }
+            ChartReadoutRule(readouts: readouts, tone: tone)
         }
-        .historyChart(end: end, yDomain: 0...1, yTicks: [0, 0.5, 1]) { tick in
+        .historyChart(end: end, yDomain: 0...1, yTicks: [0, 0.5, 1], selection: $selection) { tick in
             text.percent(tick)
         }
-        // The numbers under the chart carry the same information for VoiceOver.
-        .accessibilityHidden(true)
+        .onChange(of: selection) { _, new in
+            frozen = new == nil ? nil : (frozen ?? store.cpuHistory)
+        }
+        .onDisappear {
+            selection = nil
+            frozen = nil
+        }
+        .chartAccessibility(
+            metric: String(localized: "CPU"),
+            summary: ChartSummary.make(history.samples.map { $0.value.map { $0.first + $0.second } }),
+            series: [
+                history.descriptorSeries(named: String(localized: "User")) { $0.first },
+                history.descriptorSeries(named: String(localized: "System")) { $0.second },
+            ],
+            format: { text.percent($0) })
     }
 }
 

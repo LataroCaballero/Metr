@@ -1482,6 +1482,42 @@
           }
         }
       }
+    },
+    "%@ history, last 5 minutes": {
+      "comment": "VoiceOver label of a window chart, e.g. CPU history, last 5 minutes",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Historial de %@, últimos 5 minutos"
+          }
+        }
+      }
+    },
+    "now %@, lowest %@, highest %@, average %@": {
+      "comment": "VoiceOver value of a window chart: the latest, lowest, highest and average value over the last 5 minutes",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ahora %1$@, mínimo %2$@, máximo %3$@, promedio %4$@"
+          }
+        }
+      }
+    },
+    "Time": {
+      "comment": "Time axis title of a window chart's audio graph",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tiempo"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
