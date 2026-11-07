@@ -1,0 +1,83 @@
+/// What the system says about one mounted volume, before any decision is made. Built by
+/// `VolumeCollector` (MetrSystem) and turned into rows by `VolumeClassifier`, which is pure.
+public struct VolumeFacts: Sendable, Equatable {
+    public var path: String
+    public var name: String
+    /// The BSD name of the whole disk (an APFS container's synthesized disk), the container key.
+    public var wholeDisk: String?
+    public var isLocal: Bool
+    public var isInternal: Bool
+    public var isRoot: Bool
+    public var isBrowsable: Bool
+    public var isTimeMachine: Bool
+    /// `DADeviceProtocol`: "Apple Fabric", "USB", "Virtual Interface" (a disk image) and so on.
+    public var deviceProtocol: String?
+    public var totalBytes: Int64?
+    public var importantAvailableBytes: Int64?
+    public var availableBytes: Int64?
+
+    public init(
+        path: String, name: String, wholeDisk: String? = nil,
+        isLocal: Bool = true, isInternal: Bool = false, isRoot: Bool = false,
+        isBrowsable: Bool = true, isTimeMachine: Bool = false, deviceProtocol: String? = nil,
+        totalBytes: Int64? = nil, importantAvailableBytes: Int64? = nil, availableBytes: Int64? = nil
+    ) {
+        self.path = path
+        self.name = name
+        self.wholeDisk = wholeDisk
+        self.isLocal = isLocal
+        self.isInternal = isInternal
+        self.isRoot = isRoot
+        self.isBrowsable = isBrowsable
+        self.isTimeMachine = isTimeMachine
+        self.deviceProtocol = deviceProtocol
+        self.totalBytes = totalBytes
+        self.importantAvailableBytes = importantAvailableBytes
+        self.availableBytes = availableBytes
+    }
+}
+
+public enum VolumeRole: String, Sendable {
+    case startup, `internal`, external
+}
+
+/// One row of the Disk section: one APFS container (or one plain disk), named by its main volume.
+public struct VolumeInfo: Sendable, Equatable, Identifiable {
+    /// The container key: the whole-disk BSD name, or the mount path when that is unknown.
+    public var id: String
+    public var name: String
+    public var role: VolumeRole
+    public var totalBytes: Int64?
+    public var freeBytes: Int64?
+
+    public init(id: String, name: String, role: VolumeRole, totalBytes: Int64?, freeBytes: Int64?) {
+        self.id = id
+        self.name = name
+        self.role = role
+        self.totalBytes = totalBytes
+        self.freeBytes = freeBytes
+    }
+
+    /// total - free, never negative; nil when either figure is unknown.
+    public var usedBytes: Int64? {
+        guard let totalBytes, let freeBytes else { return nil }
+        return max(0, totalBytes - freeBytes)
+    }
+
+    /// used / total, clamped to 0...1; nil when there is no figure to draw.
+    public var usedFraction: Double? {
+        guard let usedBytes, let totalBytes, totalBytes > 0 else { return nil }
+        return min(1, max(0, Double(usedBytes) / Double(totalBytes)))
+    }
+}
+
+/// Turns the facts of every mounted volume into the rows of the Disk section (DISK-01, D-17).
+public enum VolumeClassifier {
+    public static func volumes(from facts: [VolumeFacts]) -> [VolumeInfo] {
+        []
+    }
+
+    public static func free(important: Int64?, available: Int64?) -> Int64? {
+        nil
+    }
+}

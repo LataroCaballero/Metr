@@ -4,7 +4,7 @@
 /// sampled while the window is open, whatever section it shows, so their charts keep filling, and
 /// never otherwise.
 public enum Metric: String, Sendable, Hashable, CaseIterable {
-    case cpu, memory, disk, network, gpu, processes
+    case cpu, memory, disk, network, gpu, volumes, processes
 }
 
 /// Who is asking for faster sampling. Only the popover delegate registers `.panel`, and it

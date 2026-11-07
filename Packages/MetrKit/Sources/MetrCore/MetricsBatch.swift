@@ -25,6 +25,9 @@ public struct MetricsBatch: Sendable, Equatable {
     /// The GPU (GPU-01). Window-only: present while the window is open, and `.pending` once when
     /// the window closes, so a reopened window never shows a stale value.
     public var gpu: Reading<GPUReading>?
+    /// Every real local and external volume (DISK-01). Window-only: present while the window is
+    /// open, and `.pending` once when the window closes, so a reopened window never shows a stale list.
+    public var volumes: Reading<[VolumeInfo]>?
     public var elapsed: Double
 
     public init(
@@ -34,6 +37,7 @@ public struct MetricsBatch: Sendable, Equatable {
         network: Reading<NetworkReading>? = nil,
         processes: Reading<ProcessSnapshot>? = nil,
         gpu: Reading<GPUReading>? = nil,
+        volumes: Reading<[VolumeInfo]>? = nil,
         elapsed: Double
     ) {
         self.cpu = cpu
@@ -42,6 +46,7 @@ public struct MetricsBatch: Sendable, Equatable {
         self.network = network
         self.processes = processes
         self.gpu = gpu
+        self.volumes = volumes
         self.elapsed = elapsed
     }
 }
