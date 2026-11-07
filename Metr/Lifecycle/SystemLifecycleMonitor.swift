@@ -30,6 +30,18 @@ final class SystemLifecycleMonitor {
             observe(workspace, up) { sampler in sampler.resume(reason: reason) }
         }
 
+        // Drives coming and going (DISK-02). Registering these once is cheap: with the window
+        // closed `refreshVolumes` delivers nothing, because the plan carries no volumes.
+        observe(workspace, NSWorkspace.didMountNotification) { sampler in sampler.refreshVolumes(reason: "mount") }
+        observe(workspace, NSWorkspace.didUnmountNotification) { sampler in sampler.refreshVolumes(reason: "unmount") }
+        observe(workspace, NSWorkspace.didRenameVolumeNotification) { sampler in sampler.refreshVolumes(reason: "rename") }
+        // The volume is still listed when the will-unmount notice arrives, so read again shortly
+        // after as well, once it has gone.
+        observe(workspace, NSWorkspace.willUnmountNotification) { sampler in
+            sampler.refreshVolumes(reason: "willUnmount")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { sampler.refreshVolumes(reason: "willUnmount") }
+        }
+
         let center = NotificationCenter.default
         for name in [Notification.Name.NSProcessInfoPowerStateDidChange, ProcessInfo.thermalStateDidChangeNotification] {
             observe(center, name) { sampler in sampler.setConstrained(Self.isConstrained()) }

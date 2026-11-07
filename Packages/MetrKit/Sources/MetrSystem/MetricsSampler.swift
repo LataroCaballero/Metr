@@ -152,6 +152,18 @@ public final class MetricsSampler: @unchecked Sendable {
         scheduler.setConstrained(value)
     }
 
+    /// A drive was mounted, is about to be unmounted, was unmounted or renamed (DISK-02): asks for
+    /// an immediate volume read instead of waiting for the next 10 s tick. `deliverNow` intersects
+    /// with the active plan, so with the window closed this does no volume work at all (no idle
+    /// work, RESEARCH Pitfall 16). The log line carries the reason only, never a volume name or path.
+    public func refreshVolumes(reason: String) {
+        let scheduler = self.scheduler
+        queue.async {
+            self.diagnostics?("volumes refresh reason=\(reason)")
+            scheduler.deliverNow([.volumes])
+        }
+    }
+
     /// The pid of the top child behind the process list, nil when none runs. Read on the sampler
     /// queue; used only by the lifecycle tests through `@testable import`.
     func topChildPID() -> Int32? {

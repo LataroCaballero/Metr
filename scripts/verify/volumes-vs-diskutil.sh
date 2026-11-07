@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: scripts/verify/volumes-vs-diskutil.sh
+# Usage: scripts/verify/volumes-vs-diskutil.sh [--mount]
 # Compares the volume list the RUNNING Debug app logs with what diskutil and df say, so the Disk
 # section's rows can be trusted (DISK-01, D-17). It runs the app 8 s with the window opened on Disk
 # (METR_DEBUG_WINDOW_SCRIPT=disk@1;close@7, through run-debug.sh) and then:
@@ -14,6 +14,14 @@
 #      is the false-zero check).
 # Reads only: it never writes to, mounts or ejects any volume.
 # Prints "VOLUMES-VS-DISKUTIL OK rows=<n>" or "FAIL: <what>" with exit 1.
+#
+# With --mount it checks the refresh trigger instead (DISK-02): it creates a 20 MB throwaway APFS
+# disk image under $METR_BUILD_ROOT, runs the Debug app 12 s with the window on Disk, attaches the
+# image about 4 s in and detaches it about 8 s in, and requires `volumes refresh reason=mount` and
+# `volumes refresh reason=unmount` in the log with the logged row count never changing (disk images
+# are excluded from the list, D-17). It touches only its own image: the device it attached is the
+# only one it ever detaches, and a trap detaches and deletes the image on every exit.
+# Prints "VOLUMES-VS-DISKUTIL OK mount=1 unmount=1" or "FAIL: <what>" with exit 1.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -21,6 +29,43 @@ cd "$(git rev-parse --show-toplevel)"
 source scripts/env.sh
 
 fail() { echo "FAIL: $1"; exit 1; }
+
+if [ "${1:-}" = "--mount" ]; then
+  IMAGE="$METR_BUILD_ROOT/metr-mount-check.dmg"
+  DEVICE=""
+  cleanup() {
+    if [ -n "$DEVICE" ]; then hdiutil detach "$DEVICE" -force >/dev/null 2>&1 || true; fi
+    rm -f "$IMAGE"
+  }
+  trap cleanup EXIT
+  mkdir -p "$METR_BUILD_ROOT" "$METR_LOGS"
+  rm -f "$IMAGE"
+  hdiutil create -size 20m -fs APFS -volname MetrTestVol "$IMAGE" >/dev/null || fail "could not create the test disk image"
+
+  bash scripts/verify/run-debug.sh 12 volumes-mount \
+    --env 'METR_DEBUG_WINDOW_SCRIPT=disk@1;close@11' \
+    --expect 'volumes n=[1-9]' \
+    --expect 'volumes refresh reason=mount' \
+    --expect 'volumes refresh reason=unmount' \
+    --args -MetrDidPresentWelcome YES >"$METR_LOGS/volumes-mount.out" 2>&1 &
+  APP_RUN=$!
+  sleep 4
+  ATTACH_OUT="$(hdiutil attach -noverify -noautoopen "$IMAGE")" || fail "could not attach the test disk image"
+  DEVICE="$(printf '%s\n' "$ATTACH_OUT" | head -n 1 | awk '{ print $1 }')"
+  [[ "$DEVICE" =~ ^/dev/disk[0-9]+$ ]] || { DEVICE=""; fail "could not read the attached device from hdiutil"; }
+  sleep 4
+  diskutil unmount "$(printf '%s\n' "$ATTACH_OUT" | grep -Eo '/Volumes/.*$' | head -n 1)" >/dev/null 2>&1 || true
+  sleep 1
+  hdiutil detach "$DEVICE" >/dev/null 2>&1 || hdiutil detach "$DEVICE" -force >/dev/null 2>&1 || fail "could not detach the test disk image"
+  DEVICE=""
+  wait "$APP_RUN" || { cat "$METR_LOGS/volumes-mount.out"; fail "the app run failed (see above)"; }
+
+  LOG="$METR_LOGS/volumes-mount.log"
+  distinct_counts="$(grep -Eo 'volumes n=[0-9]+' "$LOG" | sort -u | wc -l | tr -d ' ')"
+  [ "$distinct_counts" = "1" ] || fail "the logged row count changed while a disk image came and went ($distinct_counts distinct values, LOG=$LOG)"
+  echo "VOLUMES-VS-DISKUTIL OK mount=1 unmount=1"
+  exit 0
+fi
 
 bash scripts/verify/run-debug.sh 8 volumes-diskutil \
   --env 'METR_DEBUG_WINDOW_SCRIPT=disk@1;close@7' \
