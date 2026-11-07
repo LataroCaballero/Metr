@@ -103,6 +103,16 @@ struct WindowRootView: View {
 
     // MARK: Detail
 
+    /// The process table of this window session. It exists from the moment the window opens.
+    @ViewBuilder
+    private var processes: some View {
+        if let table = model.processTable {
+            ProcessesSectionView(store: store, model: table)
+        } else {
+            Color.clear
+        }
+    }
+
     @ViewBuilder
     private var detail: some View {
         switch model.section {
@@ -113,10 +123,10 @@ struct WindowRootView: View {
             if DebugHooks.chromeProbeEnabled {
                 ChromeProbeView()
             } else {
-                Color.clear
+                processes
             }
             #else
-            Color.clear
+            processes
             #endif
         case .gpu:
             GPUSectionView(store: store)

@@ -1686,6 +1686,30 @@
           }
         }
       }
+    },
+    "Name": {
+      "comment": "Process table column title for the app or process name",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nombre"
+          }
+        }
+      }
+    },
+    "Process list unavailable.": {
+      "comment": "Processes section: the one quiet line shown when the process list cannot be read at all",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lista de procesos no disponible."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -31,6 +31,10 @@ final class WindowModel {
 
     private(set) var isOpen = false
 
+    /// The Processes table's state: expansion, selection and the sort. It lives exactly as long as
+    /// the window session, so section switches keep it and closing the window discards it.
+    private(set) var processTable: ProcessTableModel?
+
     /// Release always persists. A scripted DEBUG run never does, so the verification runs leave the
     /// owner's preferences domain untouched.
     let persistsState: Bool
@@ -56,6 +60,7 @@ final class WindowModel {
 
     func setOpen(_ open: Bool) {
         isOpen = open
+        processTable = open ? ProcessTableModel(persistsState: persistsState) : nil
     }
 
     /// The section a "last visited" open shows: the stored one, else CPU (D-03). Without
