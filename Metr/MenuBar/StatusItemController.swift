@@ -12,6 +12,9 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
     private let store: MetricsStore
     private let sampler: MetricsSampler
 
+    /// Opens the Metr window (PANEL-06, D-01). Set by the app delegate, which owns the window.
+    var openWindow: ((WindowRoute) -> Void)?
+
     /// Last state assigned to the button. The image is rebuilt only when this changes (T-01-20).
     private var lastAssigned: GlyphState?
     /// Builds the three-line hover tooltip from the store (D-11 through D-13).
@@ -201,14 +204,24 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
         let close: () -> Void = { [weak self] in self?.popover.performClose(nil) }
         // One router per presentation: it dies with the panel content, so nothing stays half-confirmed.
         let escape = PanelEscapeRouter()
+        let open: (WindowRoute) -> Void = { [weak self] route in self?.openWindow?(route) }
         let hosting = PanelHostingController(
-            rootView: PanelView(store: store, onClose: close, escape: escape))
+            rootView: PanelView(store: store, onClose: close, onOpenWindow: open, escape: escape))
         hosting.sizingOptions = .preferredContentSize
         // Esc reaches the panel by two paths: the responder chain (cancelOperation) and the
         // SwiftUI exit command inside the view. Both cancel an open confirmation first and close
         // the panel only when there was none (D-14, RESEARCH Pitfall 9).
         hosting.onCancel = { if !escape.handleEscape() { close() } }
         return hosting
+    }
+
+    /// Closes the panel on behalf of the window (D-02). The window registers its own demand first, so
+    /// the `.panel` cancel in `popoverDidClose` never empties the registry. Also drops a click that
+    /// is still waiting for its first readings.
+    func closePanel() {
+        abandonPendingOpen()
+        if popover.isShown { popover.performClose(nil) }
+        DebugHooks.log("panel close requested")
     }
 
     private func showPanel() {

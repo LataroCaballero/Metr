@@ -1,0 +1,151 @@
+import AppKit
+import MetrCore
+import MetrSystem
+import SwiftUI
+
+/// Owns the one Metr window (WIN-01). AppKit hosts it, like the welcome window does: a SwiftUI
+/// `Window` scene needs an `OpenWindowAction` from a live SwiftUI view, and this app has none
+/// (owner decision of 2026-11-02, see 03-01-PLAN). `NSHostingController.sceneBridgingOptions = .all`
+/// hands the toolbar, the title and the search field of the SwiftUI content to the window.
+///
+/// The window exists only while it is open as far as cost goes: the hosting controller is created
+/// on open and released on close, because SwiftUI content left alive inside a hidden window keeps
+/// observing the store and re-rendering (the `StatusItemController.makePanelContent` lesson, FND-03).
+@MainActor
+final class WindowController: NSWindowController, NSWindowDelegate {
+    static let windowIdentifier = "MetrMainWindow"
+    private static let defaultContentSize = NSSize(width: 1000, height: 640)
+    private static let minimumContentSize = NSSize(width: 900, height: 520)
+
+    private let store: MetricsStore
+    private let sampler: MetricsSampler
+    private let model: WindowModel
+    private let closePanel: () -> Void
+
+    #if DEBUG
+    /// Lets the DEBUG log say whether the hosting controller was released after the close.
+    private weak var observedHost: NSHostingController<WindowRootView>?
+    #endif
+
+    init(store: MetricsStore, sampler: MetricsSampler, model: WindowModel, closePanel: @escaping () -> Void) {
+        self.store = store
+        self.sampler = sampler
+        self.model = model
+        self.closePanel = closePanel
+        super.init(window: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Opens the window, or brings the one that is open forward (never a second one).
+    ///
+    /// Order matters (RESEARCH Pattern 1, Pitfall 1): the window's demand is registered BEFORE the
+    /// panel closes, so the demand registry never empties in between and the process baseline the
+    /// panel built is not thrown away.
+    func show(_ route: WindowRoute) {
+        sampler.register(.window)
+        closePanel()
+
+        let window = existingOrNewWindow()
+        if !model.isOpen {
+            NSApp.setActivationPolicy(.regular)
+            let frame = window.frame
+            let host = NSHostingController(rootView: WindowRootView(store: store, model: model))
+            // The window is resizable and owns its size; the content never resizes it.
+            host.sizingOptions = []
+            host.sceneBridgingOptions = .all
+            window.contentViewController = host
+            window.setFrame(frame, display: false)
+            #if DEBUG
+            observedHost = host
+            #endif
+            model.setOpen(true)
+        }
+        model.section = resolve(route)
+
+        NSApp.activate()
+        showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+        logShown(window)
+    }
+
+    /// Closes the window the way the red button does, so the same delegate path runs.
+    func closeWindow() {
+        window?.performClose(nil)
+    }
+
+    private func resolve(_ route: WindowRoute) -> WindowSection {
+        switch route {
+        case .lastVisited: model.restoredSection()
+        case .section(let section): section
+        case .processes: .processes
+        }
+    }
+
+    /// 1000 x 640 content, at least 900 x 520. The frame is remembered between launches by the
+    /// system autosave when the model allows it (a silent convenience, not a setting).
+    private func existingOrNewWindow() -> NSWindow {
+        if let window { return window }
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: Self.defaultContentSize),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false)
+        window.isReleasedWhenClosed = false
+        window.identifier = NSUserInterfaceItemIdentifier(Self.windowIdentifier)
+        window.title = "Metr"
+        window.contentMinSize = Self.minimumContentSize
+        window.delegate = self
+        var restored = false
+        if model.persistsState {
+            restored = window.setFrameUsingName(Self.windowIdentifier)
+            window.setFrameAutosaveName(Self.windowIdentifier)
+        }
+        if !restored { window.center() }
+        self.window = window
+        return window
+    }
+
+    // MARK: NSWindowDelegate
+
+    func windowWillClose(_ notification: Notification) {
+        sampler.cancel(.window)
+        // A hosting controller left on a closed window keeps observing the store (FND-03).
+        window?.contentViewController = nil
+        model.setOpen(false)
+        // On the next turn, so the window finishes closing as a regular app's window. A reopen in
+        // between keeps the regular policy.
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.model.isOpen else { return }
+                NSApp.setActivationPolicy(.accessory)
+                DebugHooks.log("window closed policy=accessory")
+                #if DEBUG
+                DebugHooks.log("window content released=\(self.observedHost == nil ? 1 : 0)")
+                #endif
+            }
+        }
+    }
+
+    // MARK: DEBUG logging
+
+    private func logShown(_ window: NSWindow) {
+        #if DEBUG
+        let count = NSApp.windows.filter {
+            $0.identifier?.rawValue == Self.windowIdentifier && $0.isVisible
+        }.count
+        DebugHooks.log("window shown section=\(model.section.rawValue) count=\(count)")
+        // Same 0.3 s check as the shell spike: a scripted launch cannot prove focus from a real
+        // click (RESEARCH Pitfall 2), but it shows whether the window is visible and what policy holds.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            MainActor.assumeIsolated {
+                let policy = NSApp.activationPolicy() == .regular ? "regular" : "accessory"
+                DebugHooks.log(
+                    "window visible=\(window.isVisible ? 1 : 0) key=\(window.isKeyWindow ? 1 : 0)"
+                        + " active=\(NSApp.isActive ? 1 : 0) policy=\(policy)")
+            }
+        }
+        #endif
+    }
+}

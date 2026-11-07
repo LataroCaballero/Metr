@@ -77,6 +77,44 @@ nonisolated enum DebugHooks {
         #endif
     }
 
+    /// The window script (Phase 3): `step@seconds` pairs separated by `;`, where a step is a section
+    /// name, `last` (the last-visited section) or `close`. The time is the number after the LAST `@`,
+    /// so a step that itself contains `@` survives. Release returns nothing and holds no environment name.
+    static var windowScript: [(step: String, at: Double)] {
+        #if DEBUG
+        guard let raw = ProcessInfo.processInfo.environment["METR_DEBUG_WINDOW_SCRIPT"], !raw.isEmpty else { return [] }
+        return raw.split(separator: ";").compactMap { part in
+            guard let at = part.lastIndex(of: "@"), let seconds = Double(part[part.index(after: at)...]),
+                seconds.isFinite, seconds >= 0
+            else { return nil }
+            let step = String(part[..<at]).trimmingCharacters(in: .whitespaces)
+            return step.isEmpty ? nil : (step: step, at: seconds)
+        }
+        #else
+        return []
+        #endif
+    }
+
+    /// True while a window script drives the app: such a run never writes the section, the frame
+    /// autosave or the sort, so scripted verification leaves the owner's preferences untouched.
+    static var windowScriptActive: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["METR_DEBUG_WINDOW_SCRIPT"]?.isEmpty == false
+        #else
+        return false
+        #endif
+    }
+
+    /// When true, the window shows the DEBUG chrome probe controls on Processes (a toolbar search
+    /// field and a toolbar menu) and logs what the AppKit host bridged. Release: false, no name.
+    static var chromeProbeEnabled: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["METR_DEBUG_CHROME_PROBE"] == "1"
+        #else
+        return false
+        #endif
+    }
+
     /// Scheduler diagnostics sink, present only when the log hook is active.
     static var diagnostics: (@Sendable (String) -> Void)? {
         #if DEBUG

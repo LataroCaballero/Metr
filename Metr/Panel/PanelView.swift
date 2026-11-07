@@ -23,6 +23,9 @@ struct PanelView: View {
     let store: MetricsStore
     /// Closes the panel. Called on Esc (`onExitCommand`); the default keeps `PanelView(store:)` compiling.
     var onClose: () -> Void = {}
+    /// Opens the Metr window (PANEL-06, D-01). The footer button, Cmd-0 and, later, the "and N more…"
+    /// link all call it; the default keeps `PanelView(store:)` compiling for the debug renderer.
+    var onOpenWindow: (WindowRoute) -> Void = { _ in }
     /// Esc priority: an open confirmation is cancelled before the panel closes. A fresh router by
     /// default, so `PanelView(store:)` keeps compiling.
     var escape = PanelEscapeRouter()
@@ -45,15 +48,19 @@ struct PanelView: View {
             Divider()
             TopAppsSection(store: store, escape: escape, model: topApps)
             Divider()
-            HStack {
-                // The leading side holds the partial-state line; Phase 3 adds "Open Window" here.
-                // The footer height is set by the Quit button, so the line never resizes the panel.
+            // Fixed 28 pt row (footer 60 pt with its padding): the partial-state line wraps to at
+            // most two lines beside the two small buttons and never resizes the panel.
+            HStack(spacing: 8) {
                 if systemProcessesMissing {
                     Text("System processes not shown.")
                         .font(.subheadline)
                         .foregroundStyle(Color.secondary)
-                        .lineLimit(1)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
                         .minimumScaleFactor(0.85)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Spacer(minLength: 0)
                 }
                 #if DEBUG
                 if DebugHooks.shellSpikeEnabled {
@@ -64,18 +71,26 @@ struct PanelView: View {
                         Text(verbatim: "Bring Window to Front")
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
                 #endif
-                Spacer()
+                Button("Open Metr") { onOpenWindow(.lastVisited) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .keyboardShortcut("0", modifiers: .command)
+                    .layoutPriority(1)
                 Button("Quit Metr") { NSApp.terminate(nil) }
                     .buttonStyle(.bordered)
-                    .controlSize(.regular)
+                    .controlSize(.small)
                     .keyboardShortcut("q", modifiers: .command)
+                    .layoutPriority(1)
             }
+            .frame(height: 28)
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
         }
         .frame(width: 320)
+        .environment(\.openMetrWindow, onOpenWindow)
         .onExitCommand { if !escape.handleEscape() { onClose() } }
     }
 }

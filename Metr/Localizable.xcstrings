@@ -1038,6 +1038,66 @@
           }
         }
       }
+    },
+    "Open Metr": {
+      "comment": "Panel footer button that opens the Metr window (PANEL-06)",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir Metr"
+          }
+        }
+      }
+    },
+    "Network": {
+      "comment": "Window sidebar row and window title for network activity",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Red"
+          }
+        }
+      }
+    },
+    "GPU": {
+      "comment": "Window sidebar row and window title for the graphics processor",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GPU"
+          }
+        }
+      }
+    },
+    "Processes": {
+      "comment": "Window sidebar row and window title for the full process list",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Procesos"
+          }
+        }
+      }
+    },
+    "%@ free": {
+      "comment": "Window sidebar value of the Disk row, e.g. 210 GB free",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ libres"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
