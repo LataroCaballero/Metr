@@ -64,6 +64,23 @@ public struct SeriesPair: Sendable, Equatable {
     }
 }
 
+/// One memory sample of the window chart: the fill the ring shows (100 - kern.memorystatus_level,
+/// the same signal as the ring, D-08) and the pressure level the sample is tinted by.
+public struct MemoryHistoryValue: Sendable, Equatable {
+    public var fill: Double
+    public var pressure: MemoryPressure
+
+    public init(fill: Double, pressure: MemoryPressure) {
+        self.fill = fill
+        self.pressure = pressure
+    }
+
+    public init(_ reading: MemoryReading) {
+        // RED stub: compiles, behaves wrongly until the GREEN commit.
+        self.init(fill: 0, pressure: .normal)
+    }
+}
+
 /// A contiguous run of present samples that a chart draws as one connected series. Swift Charts
 /// cannot plot an `Optional` in this SDK, so a gap is a break between runs, each with its own
 /// `series:` value (RESEARCH Pattern 4).

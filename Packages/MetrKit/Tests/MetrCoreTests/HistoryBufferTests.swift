@@ -88,6 +88,50 @@ import Testing
         #expect(runs[1].samples.first?.value == "a")
     }
 
+    // MARK: Memory runs
+
+    private func memoryReading(free: Int, _ pressure: MemoryPressure) -> MemoryReading {
+        MemoryReading(
+            usedBytes: 8_000_000_000, totalBytes: 16_000_000_000, swapUsedBytes: 0, freePercent: free,
+            pressure: pressure)
+    }
+
+    private func memorySamples(_ levels: [MemoryPressure?]) -> [HistorySample<MemoryHistoryValue>] {
+        levels.enumerated().map { index, level in
+            HistorySample(
+                time: Double(index), value: level.map { MemoryHistoryValue(memoryReading(free: 40, $0)) })
+        }
+    }
+
+    @Test func memoryRunsByLevel() {
+        let samples = memorySamples([.normal, .normal, .warn, .warn, .normal])
+        let runs = ChartSegments.runs(samples, maxGap: 3.5, key: { $0.pressure })
+        #expect(runs.count == 3)
+        guard runs.count == 3 else { return }
+        #expect(runs.map(\.key) == [.normal, .warn, .normal])
+        #expect(runs[0].samples.map(\.time) == [0, 1])
+        // Each new level begins with the previous run's last sample, so the segments touch.
+        #expect(runs[1].samples.map(\.time) == [1, 2, 3])
+        #expect(runs[2].samples.map(\.time) == [3, 4])
+    }
+
+    @Test func memoryNilSplitsRegardlessOfKey() {
+        let samples = memorySamples([.normal, nil, .normal])
+        let runs = ChartSegments.runs(samples, maxGap: 3.5, key: { $0.pressure })
+        #expect(runs.count == 2)
+        guard runs.count == 2 else { return }
+        #expect(runs[0].samples.map(\.time) == [0])
+        #expect(runs[1].samples.map(\.time) == [2])
+        // The same key on both sides does not join them: no sample is invented across the gap.
+        #expect(runs.map(\.key) == [.normal, .normal])
+    }
+
+    @Test func memoryValueIsTheRingSignal() {
+        let value = MemoryHistoryValue(memoryReading(free: 40, .warn))
+        #expect(value.fill == 0.6)
+        #expect(value.pressure == .warn)
+    }
+
     // MARK: Axis
 
     @Test func gridTimes() {
