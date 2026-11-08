@@ -4,7 +4,7 @@
 /// sampled while the window is open, whatever section it shows, so their charts keep filling, and
 /// never otherwise.
 public enum Metric: String, Sendable, Hashable, CaseIterable {
-    case cpu, memory, disk, network, gpu, volumes, processes
+    case cpu, memory, disk, network, gpu, diskIO, volumes, processes
 }
 
 /// Who is asking for faster sampling. Only the popover delegate registers `.panel`, and it
@@ -50,6 +50,7 @@ public struct SamplingPlan: Sendable, Equatable {
     public static let windowDisk = 10.0
     public static let windowGPU = 1.0
     public static let windowNetwork = 1.0
+    public static let windowDiskIO = 1.0
     /// Volumes cost about 16.6 ms each (`resourceValues`), so they sit on the Disk cadence, window only.
     public static let windowVolumes = 10.0
     /// The roadmap's "2 s or slower" for the process list; absent from the idle tier (D-20).
