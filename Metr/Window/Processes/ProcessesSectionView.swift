@@ -64,7 +64,11 @@ struct ProcessesSectionView: View {
         let ascending = active == model.column ? model.ascending : ProcessTableOrdering.defaultAscending(active)
         return ProcessOutlineView(
             model: model, rows: rows, active: active, activeAscending: ascending, text: text)
-        .onChange(of: snapshot.sequence) { model.prune() }
+        .onAppear { model.applyPendingFocus() }
+        .onChange(of: snapshot.sequence) {
+            model.prune()
+            model.applyPendingFocus()
+        }
         #if DEBUG
         .task(id: rows.isEmpty) {
             guard !rows.isEmpty else { return }

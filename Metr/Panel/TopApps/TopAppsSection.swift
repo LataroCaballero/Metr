@@ -92,7 +92,7 @@ struct TopAppsSection: View {
                                 confirmForceQuit: { model.confirmForceQuit(helper.id) },
                                 cancelForceQuit: { model.cancelForceQuit(helper.id) })
                         }
-                        if row.moreCount > 0 { MoreLine(count: row.moreCount) }
+                        if row.moreCount > 0 { MoreLine(count: row.moreCount, groupID: row.id) }
                     }
                 }
             case .unavailable:

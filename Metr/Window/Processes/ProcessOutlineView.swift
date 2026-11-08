@@ -221,7 +221,83 @@ struct ProcessOutlineView: NSViewRepresentable {
                 }
             }
             reconcileSelection(in: outline)
+            consumeScrollTarget(in: outline)
         }
+
+        // MARK: Scrolling a group into view (the "and N more…" deep link, D-01, D-03)
+
+        /// A group the model asked to show (`ProcessTableModel.focus`) is scrolled to the middle of
+        /// the table. The model's expansion and selection were applied just before this, so the row
+        /// is there and highlighted by the time it moves.
+        private func consumeScrollTarget(in outline: NSOutlineView) {
+            guard let id = model.scrollTarget else { return }
+            model.scrollTarget = nil
+            guard nodes[id] != nil else { return }
+            center(id: id, attempt: 0)
+            #if DEBUG
+            logFocus(id: id)
+            #endif
+        }
+
+        /// Puts the row in the middle of the visible area. On the very first layout the clip view has
+        /// no height yet, so it tries again for up to a second.
+        private func center(id: String, attempt: Int) {
+            guard let outline, let scrollView, let node = nodes[id] else { return }
+            let row = outline.row(forItem: node)
+            guard row >= 0 else { return }
+            let clip = scrollView.contentView
+            guard clip.bounds.height >= 1 else {
+                guard attempt < 10 else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    MainActor.assumeIsolated { self?.center(id: id, attempt: attempt + 1) }
+                }
+                return
+            }
+            let rect = outline.rect(ofRow: row)
+            let wanted = NSRect(
+                x: clip.bounds.origin.x, y: rect.midY - clip.bounds.height / 2,
+                width: clip.bounds.width, height: clip.bounds.height)
+            clip.scroll(to: clip.constrainBoundsRect(wanted).origin)
+            scrollView.reflectScrolledClipView(clip)
+        }
+
+        #if DEBUG
+        /// Half a second after a deep link, says whether the group is there, open, selected and on
+        /// screen. When it is not on screen, falls back to the table's own `scrollRowToVisible`
+        /// (RESEARCH assumption A5) and measures again; `fallback=1` records that it was needed.
+        private func logFocus(id: String) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, let outline = self.outline, let scrollView = self.scrollView else { return }
+                    guard let node = self.nodes[id] else {
+                        DebugHooks.log("table focus found=0 expanded=0 selected=0 inview=0 fallback=0")
+                        return
+                    }
+                    var fallback = 0
+                    var row = outline.row(forItem: node)
+                    if row >= 0, !Self.isInView(row: row, outline: outline, scrollView: scrollView) {
+                        outline.scrollRowToVisible(row)
+                        fallback = 1
+                    }
+                    row = outline.row(forItem: node)
+                    let inview = row >= 0 && Self.isInView(row: row, outline: outline, scrollView: scrollView)
+                    let selected = row >= 0 && outline.selectedRowIndexes.contains(row)
+                    DebugHooks.log(
+                        "table focus found=1 expanded=\(outline.isItemExpanded(node) ? 1 : 0)"
+                            + " selected=\(selected ? 1 : 0) inview=\(inview ? 1 : 0) fallback=\(fallback)")
+                }
+            }
+        }
+
+        /// The whole row is inside the part of the table not hidden under the toolbar.
+        private static func isInView(row: Int, outline: NSOutlineView, scrollView: NSScrollView) -> Bool {
+            var visible = outline.visibleRect
+            let top = scrollView.contentInsets.top
+            visible.origin.y += top
+            visible.size.height -= top
+            return visible.contains(outline.rect(ofRow: row))
+        }
+        #endif
 
         private func reconcileExpansion(in outline: NSOutlineView) {
             for node in roots where !node.children.isEmpty {

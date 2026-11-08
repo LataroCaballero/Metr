@@ -420,22 +420,49 @@ struct HelperRow: View {
     }
 }
 
-/// "and N more…" under an open group: plain 11 pt secondary text at the name column, not a
-/// control (D-08, UI-SPEC "and N more… line").
+/// "and N more…" under an open group: a link that shows every helper in the Metr window (D-01,
+/// UI-SPEC "and N more… line"). Plain 11 pt text at the name column, secondary at rest, primary with
+/// an underline and the pointing hand on hover, a Tab stop after its group's helper rows, activated
+/// by a click, Return or Space. It stays one 20 pt line, so the panel never changes height.
 struct MoreLine: View {
     let count: Int
+    /// The group the link is under; the window opens on Processes with this group in view.
+    let groupID: String
+
+    @Environment(\.openMetrWindow) private var openMetrWindow
+    @State private var isHovering = false
+    @FocusState private var focused: Bool
 
     var body: some View {
+        let lit = isHovering || focused
         HStack(spacing: 0) {
             Color.clear.frame(width: 44)
-            Text("and \(count) more…")
-                .font(.subheadline)
-                .foregroundStyle(Color.secondary)
-                .lineLimit(1)
+            Button(action: open) {
+                Text("and \(count) more…")
+                    .font(.subheadline)
+                    .foregroundStyle(lit ? Color.primary : Color.secondary)
+                    .underline(lit)
+                    .lineLimit(1)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusable()
+            .focused($focused)
+            .focusEffectDisabled()
+            .onKeyPress(.return) { open(); return .handled }
+            .onKeyPress(.space) { open(); return .handled }
+            .onHover { isHovering = $0 }
+            .pointerStyle(.link)
+            .help("Show all in the Metr window")
+            .accessibilityLabel(Text("and \(count) more. Opens the Metr window on Processes."))
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
         .frame(height: 20)
+    }
+
+    private func open() {
+        openMetrWindow(.processes(focusGroup: groupID))
     }
 }
 

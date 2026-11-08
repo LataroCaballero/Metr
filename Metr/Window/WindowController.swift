@@ -77,6 +77,10 @@ final class WindowController: NSWindowController, NSWindowDelegate {
             model.setOpen(true)
         }
 
+        // The deep link (D-01): the table exists now, so the group can be opened, selected and scrolled
+        // to. A second link while the window is open lands here too and moves the same window.
+        if case .processes(let groupID) = route { model.processTable?.focus(groupID: groupID) }
+
         NSApp.activate()
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)

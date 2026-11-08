@@ -889,6 +889,30 @@
         }
       }
     },
+    "and %lld more. Opens the Metr window on Processes.": {
+      "comment": "VoiceOver label of the 'and N more…' link under an open app group in the panel",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "y %lld más. Abre la ventana de Metr en Procesos."
+          }
+        }
+      }
+    },
+    "Show all in the Metr window": {
+      "comment": "Tooltip of the 'and N more…' link in the panel: it opens the Metr window on that app's processes",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ver todos en la ventana de Metr"
+          }
+        }
+      }
+    },
     "Expand %@": {
       "comment": "VoiceOver label of the disclosure chevron of a closed app row, e.g. Expand Google Chrome",
       "extractionState": "manual",

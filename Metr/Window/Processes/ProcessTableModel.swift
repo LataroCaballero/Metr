@@ -70,6 +70,14 @@ final class ProcessTableModel {
     /// Whether the order is held still. 03-13 sets it from the pointer and the selection (D-16).
     @ObservationIgnored var isFrozen = false
 
+    /// The group the outline should scroll into view on its next update. Written by `focus`, read and
+    /// cleared by the host while it applies a refresh, so it is not observed.
+    @ObservationIgnored var scrollTarget: String?
+    /// A deep link whose group is not in a reading yet (the window just opened). Applied on the first
+    /// reading that has it, dropped silently after three seconds (T-03-28).
+    @ObservationIgnored private var pendingFocus: (id: String, deadline: Date)?
+    private static let pendingFocusLifetime: TimeInterval = 3
+
     @ObservationIgnored private let naming = ProcessNaming(cacheLimit: ProcessTableModel.cacheLimit)
     @ObservationIgnored private var grouped: (sequence: UInt64, groups: [ProcessGroup])?
     @ObservationIgnored private var previousGroups: [String] = []
@@ -123,13 +131,26 @@ final class ProcessTableModel {
         }
     }
 
-    /// A two-way binding to whether one group is open, for `DisclosureTableRow`.
-    func binding(expandedFor id: String) -> Binding<Bool> {
-        Binding(
-            get: { self.expanded.contains(id) },
-            set: { open in
-                if open { self.expanded.insert(id) } else { self.expanded.remove(id) }
-            })
+    /// The "and N more…" deep link (D-01, D-02): opens one group, selects it and asks the outline to
+    /// scroll it into view. When the group is not in a reading yet the focus waits for it, for up to
+    /// three seconds, and then disappears without an error (T-03-28).
+    func focus(groupID: String) {
+        pendingFocus = (groupID, Date().addingTimeInterval(Self.pendingFocusLifetime))
+        applyPendingFocus()
+    }
+
+    /// Applies a waiting focus once its group is in the rows. Called when the table appears and on
+    /// every new reading, outside the view update.
+    func applyPendingFocus() {
+        guard let pending = pendingFocus else { return }
+        if liveIDs.contains(pending.id) {
+            pendingFocus = nil
+            expanded.insert(pending.id)
+            selection = [pending.id]
+            scrollTarget = pending.id
+        } else if Date() > pending.deadline {
+            pendingFocus = nil
+        }
     }
 
     /// Forgets expansion and selection of rows that are gone. Called once per new reading, outside
