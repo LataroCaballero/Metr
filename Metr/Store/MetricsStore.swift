@@ -20,6 +20,10 @@ final class MetricsStore {
     /// The GPU (GPU-01), sampled only while the window is open. `.pending` until the first reading
     /// and again after the window closes, so a reopened window never shows a stale value.
     private(set) var gpu: Reading<GPUReading> = .pending
+    /// System-wide disk read and write speed (WIN-02, D-08), sampled only while the window is open.
+    /// `.pending` until the second sample and again after the window closes, so a reopened window
+    /// never shows a stale rate.
+    private(set) var diskIO: Reading<DiskIOReading> = .pending
     /// Every real local and external volume, one entry per container (DISK-01), read only while the
     /// window is open. `.pending` until the first reading and again after the window closes.
     private(set) var volumes: Reading<[VolumeInfo]> = .pending
@@ -43,6 +47,9 @@ final class MetricsStore {
     /// The network history of the open window: first = download, second = upload, both in bytes per
     /// second. A pending or failed read is a gap, never a zero.
     private(set) var networkHistory = HistoryBuffer<SeriesPair>()
+    /// The disk I/O history of the open window: first = read, second = write, both in bytes per
+    /// second. A pending or failed read is a gap, never a zero.
+    private(set) var diskIOHistory = HistoryBuffer<SeriesPair>()
     /// Bytes received and sent since the window opened (D-18): the sum of every reading's byte
     /// deltas, not a rate times the cadence, so they match what netstat counted. Zero outside a
     /// window session.
@@ -113,6 +120,7 @@ final class MetricsStore {
         // Window-only readings do not outlive the window (D-06).
         gpu = .pending
         network = .pending
+        diskIO = .pending
         volumes = .pending
         windowSessionActive = false
         windowSessionStart = nil
@@ -130,6 +138,7 @@ final class MetricsStore {
         gpuHistory.removeAll()
         memoryHistory.removeAll()
         networkHistory.removeAll()
+        diskIOHistory.removeAll()
     }
 
     func apply(_ batch: MetricsBatch, at time: Double = Date.now.timeIntervalSinceReferenceDate) {
@@ -187,6 +196,23 @@ final class MetricsStore {
                 recorded = true
             }
         }
+        if let reading = batch.diskIO {
+            // A baseline-only sample after a wake or a rebase is .pending: keep the last real rate
+            // until the next one arrives, like CPU. The window closing resets it explicitly.
+            if reading == .pending, diskIO.value != nil {
+                // keep
+            } else {
+                diskIO = reading
+            }
+            DebugHooks.log(Self.describe(diskIO: reading))
+            if windowSessionActive {
+                // The rates of this sample, or a gap: a baseline-only or failed read plots nothing.
+                diskIOHistory.append(
+                    time: time,
+                    value: reading.value.map { SeriesPair(first: $0.readBytesPerSec, second: $0.writeBytesPerSec) })
+                recorded = true
+            }
+        }
         if let reading = batch.volumes {
             volumes = reading
             for line in Self.describe(volumes: reading) { DebugHooks.log(line) }
@@ -195,7 +221,8 @@ final class MetricsStore {
             // Counts only (T-03-07).
             DebugHooks.log(
                 "history cpu=\(cpuHistory.samples.count) mem=\(memoryHistory.samples.count)"
-                    + " gpu=\(gpuHistory.samples.count) net=\(networkHistory.samples.count)")
+                    + " gpu=\(gpuHistory.samples.count) net=\(networkHistory.samples.count)"
+                    + " diskio=\(diskIOHistory.samples.count)")
         }
         diskTint = TintLogic.disk(freeFraction: disk.value?.freeFraction, previous: diskTint)
         didApply?()
@@ -233,6 +260,17 @@ final class MetricsStore {
         case .value(let value):
             return "net down=\(Int64(value.downBytesPerSec.rounded())) up=\(Int64(value.upBytesPerSec.rounded()))"
                 + " primary=\(value.hasPrimary ? 1 : 0)"
+        }
+    }
+
+    /// Whole bytes per second only: `diskio r=1200 w=300`, or the pending / unavailable word.
+    /// DEBUG log only.
+    private static func describe(diskIO reading: Reading<DiskIOReading>) -> String {
+        switch reading {
+        case .pending: return "diskio pending"
+        case .unavailable: return "diskio unavailable"
+        case .value(let value):
+            return "diskio r=\(Int64(value.readBytesPerSec.rounded())) w=\(Int64(value.writeBytesPerSec.rounded()))"
         }
     }
 

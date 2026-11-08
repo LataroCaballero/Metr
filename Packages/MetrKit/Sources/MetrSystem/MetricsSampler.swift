@@ -7,7 +7,7 @@ import MetrCore
 /// values to a `@Sendable` sink.
 public final class MetricsSampler: @unchecked Sendable {
     /// Metrics this build has collectors for.
-    private static let supported: Set<Metric> = [.cpu, .memory, .disk, .network, .gpu, .volumes, .processes]
+    private static let supported: Set<Metric> = [.cpu, .memory, .disk, .network, .gpu, .diskIO, .volumes, .processes]
 
     private let queue = DispatchQueue(label: "Metr.sampler", qos: .utility)
     private let scheduler: SamplingScheduler
@@ -16,6 +16,7 @@ public final class MetricsSampler: @unchecked Sendable {
     private let disk = DiskCollector()  // confined to `queue`
     private let network = NetworkCollector()  // confined to `queue`; reads the kernel's counters only while the window is open
     private let gpu = GPUCollector()  // confined to `queue`; touches IOKit only while the window is open
+    private let diskIO = DiskIOCollector()  // confined to `queue`; reads block-storage statistics only while the window is open
     private let volumes = VolumeCollector()  // confined to `queue`; reads the mounts only while the window is open
     private let processes: ProcessCollector  // confined to `queue`
     /// The one top child behind the process list. Started by the collector on the first process
@@ -44,6 +45,7 @@ public final class MetricsSampler: @unchecked Sendable {
             self.emit = onBatch
             self.cpu.resetBaseline()
             self.network.resetBaseline()
+            self.diskIO.resetBaseline()
             self.scheduler.onPlanChange = { plan in
                 diagnostics?(Self.describe(plan))
             }
@@ -72,6 +74,7 @@ public final class MetricsSampler: @unchecked Sendable {
                 if sampled.contains(.disk) { batch.disk = disk.sample() }
                 if sampled.contains(.network) { batch.network = network.sample() }
                 if sampled.contains(.gpu) { batch.gpu = gpu.sample() }
+                if sampled.contains(.diskIO) { batch.diskIO = diskIO.sample() }
                 if sampled.contains(.volumes) { batch.volumes = volumes.sample() }
                 if sampled.contains(.processes) { batch.processes = processes.sample() }
                 onBatch(batch)
@@ -79,9 +82,10 @@ public final class MetricsSampler: @unchecked Sendable {
             onBaseline: { [self] in
                 // Runs on `queue`, right before the scheduler's all-metrics baseline tick: a
                 // delta must never span a suspension. Every delta baseline resets here, which is
-                // how a real wake re-takes the network baseline (CLAUDE.md "Wake/sleep").
+                // how a real wake re-takes the network and disk I/O baselines (CLAUDE.md "Wake/sleep").
                 cpu.resetBaseline()
                 network.resetBaseline()
+                diskIO.resetBaseline()
                 processes.reset()
             })
     }
@@ -112,12 +116,14 @@ public final class MetricsSampler: @unchecked Sendable {
                 }
                 if SamplingPlan.carriesWindow(before) && !SamplingPlan.carriesWindow(self.registry.active) {
                     // Window-only metrics are never left stale: the window tier ended, so the store
-                    // gets pending GPU, network and volume readings and a reopened window starts from
-                    // nothing. The network baseline goes too, so the first rate after a reopen is
-                    // measured afresh, and the DiskArbitration session is dropped.
+                    // gets pending GPU, network, disk I/O and volume readings and a reopened window starts
+                    // from nothing. The network and disk I/O baselines go too, so the first rate after a
+                    // reopen is measured afresh, and the DiskArbitration session is dropped.
                     self.network.resetBaseline()
+                    self.diskIO.resetBaseline()
                     self.volumes.reset()
-                    self.emit?(MetricsBatch(network: .pending, gpu: .pending, volumes: .pending, elapsed: 0))
+                    self.emit?(
+                        MetricsBatch(network: .pending, gpu: .pending, diskIO: .pending, volumes: .pending, elapsed: 0))
                 }
                 self.scheduler.setDemand(self.registry.active)
             }
@@ -137,7 +143,7 @@ public final class MetricsSampler: @unchecked Sendable {
         }
     }
 
-    /// The scheduler resets the CPU and network baselines through `onBaseline` only when it actually
+    /// The scheduler resets the CPU, network and disk I/O baselines through `onBaseline` only when it actually
     /// re-primes (it takes a fresh baseline tick, then primes). So a real wake never lets a rate
     /// span the sleep, and a resume with no matching suspend, or one made while another reason
     /// still holds, keeps the last baseline because no time was suspended (WR-04).
