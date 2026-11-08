@@ -84,7 +84,8 @@ enum ProcessKernel {
     }
 
     /// `proc_pid_rusage(RUSAGE_INFO_V4)`: footprint is `ri_phys_footprint` (Activity Monitor's
-    /// Memory), CPU is user plus system time converted from mach absolute units.
+    /// Memory), CPU is user plus system time converted from mach absolute units, and the disk
+    /// counters are `ri_diskio_bytesread` / `ri_diskio_byteswritten` from the same call (PROC-04).
     static func usage(of pid: Int32) -> ProcessUsage? {
         var info = rusage_info_v4()
         let rc = withUnsafeMutablePointer(to: &info) { p in
@@ -96,7 +97,8 @@ enum ProcessKernel {
         let (ticks, overflow) = info.ri_user_time.addingReportingOverflow(info.ri_system_time)
         return ProcessUsage(
             cpuNanos: overflow ? UInt64.max : machTicksToNanos(ticks),
-            footprintBytes: info.ri_phys_footprint)
+            footprintBytes: info.ri_phys_footprint,
+            diskReadBytes: info.ri_diskio_bytesread, diskWrittenBytes: info.ri_diskio_byteswritten)
     }
 
     static func path(of pid: Int32) -> String? {
@@ -140,6 +142,13 @@ public final class ProcessCollector {
         var wall: UInt64
         /// The last CPU percent measured over a full window; carried through short windows.
         var lastCPU: Double?
+        /// The disk counters at the last full window, and the rates measured over it (PROC-04).
+        /// They live here, beside the CPU baseline, so `reset()` drops them with it and no rate
+        /// spans a sleep. A nil rate is not measured yet, never a zero.
+        var diskReadBytes: UInt64 = 0
+        var diskWrittenBytes: UInt64 = 0
+        var lastDiskRead: Double?
+        var lastDiskWrite: Double?
         var path: String?
     }
 
@@ -192,16 +201,28 @@ public final class ProcessCollector {
                     item = known
                     if now > known.wall, now - known.wall >= minimumCPUWindowNanos {
                         let used = usage.cpuNanos >= known.cpuNanos ? usage.cpuNanos - known.cpuNanos : 0
+                        let seconds = Double(now - known.wall) / 1e9
                         cpu = Double(used) / Double(now - known.wall) * 100
                         item.cpuNanos = usage.cpuNanos
                         item.wall = now
                         item.lastCPU = cpu
+                        // Disk rates share the CPU window. A counter that went down (a restarted
+                        // accounting, a wrap) is not a rate: nil for this window, rebased.
+                        item.lastDiskRead = Self.rate(
+                            from: known.diskReadBytes, to: usage.diskReadBytes, seconds: seconds)
+                        item.lastDiskWrite = Self.rate(
+                            from: known.diskWrittenBytes, to: usage.diskWrittenBytes, seconds: seconds)
+                        item.diskReadBytes = usage.diskReadBytes
+                        item.diskWrittenBytes = usage.diskWrittenBytes
                     } else {
                         cpu = known.lastCPU
                     }
                 } else {
                     // First sight: a baseline, and the path is resolved once for this identity.
-                    item = Tracked(cpuNanos: usage.cpuNanos, wall: now, lastCPU: nil, path: sources.path(pid))
+                    item = Tracked(
+                        cpuNanos: usage.cpuNanos, wall: now, lastCPU: nil,
+                        diskReadBytes: usage.diskReadBytes, diskWrittenBytes: usage.diskWrittenBytes,
+                        path: sources.path(pid))
                 }
                 if cpu != nil { anyOwnCPU = true }
                 tracked[entry.identity] = item
@@ -210,7 +231,8 @@ public final class ProcessCollector {
                     ProcessSample(
                         identity: entry.identity, ppid: entry.ppid, uid: entry.uid,
                         path: item.path, command: entry.command,
-                        cpuPercent: cpu, footprintBytes: usage.footprintBytes))
+                        cpuPercent: cpu, footprintBytes: usage.footprintBytes,
+                        diskReadPerSec: item.lastDiskRead, diskWritePerSec: item.lastDiskWrite))
             } else {
                 // Another user's process: libproc cannot read it, top can. The path is still
                 // resolved once so root-owned .app bundles group like user apps (owner decision Q5).
@@ -283,7 +305,15 @@ public final class ProcessCollector {
         entry.ppid == sources.selfPID && path == "/usr/bin/top"
     }
 
-    /// Forgets every baseline and cached path: the next sample is a baseline again.
+    /// Bytes per second between two cumulative counters, nil when the counter went backwards.
+    private static func rate(from before: UInt64, to after: UInt64, seconds: Double) -> Double? {
+        guard after >= before, seconds > 0 else { return nil }
+        return Double(after - before) / seconds
+    }
+
+    /// Forgets every baseline and cached path: the next sample is a baseline again. That includes
+    /// the disk counters and rates, so the first reading after a sleep has no disk rate and the
+    /// first one measured spans only time after the reset (PROC-04; the phase's wake policy).
     public func reset() {
         tracked.removeAll()
         cpuReadySeen = false

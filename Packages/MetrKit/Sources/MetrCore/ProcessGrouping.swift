@@ -161,9 +161,13 @@ public enum ProcessGrouping {
         let all = (main.map { [$0] } ?? []) + helpers
         let cpu = all.compactMap(\.cpuPercent)
         let footprint = all.compactMap(\.footprintBytes)
+        let read = all.compactMap(\.diskReadPerSec)
+        let write = all.compactMap(\.diskWritePerSec)
         return ProcessGroup(
             id: id, appPath: appPath, main: main, helpers: helpers,
             cpuPercent: cpu.isEmpty ? nil : cpu.reduce(0, +),
-            footprintBytes: footprint.isEmpty ? nil : footprint.reduce(0, +))
+            footprintBytes: footprint.isEmpty ? nil : footprint.reduce(0, +),
+            diskReadPerSec: read.isEmpty ? nil : read.reduce(0, +),
+            diskWritePerSec: write.isEmpty ? nil : write.reduce(0, +))
     }
 }

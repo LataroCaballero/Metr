@@ -329,7 +329,10 @@ final class MetricsStore {
         return snapshot.processes.filter { pids.contains($0.identity.pid) }.map { sample in
             let mem = sample.footprintBytes.map { String($0) } ?? "-"
             let cpu = sample.cpuPercent.map { String(format: "%.1f", $0) } ?? "pending"
-            return "probe pid=\(sample.identity.pid) mem=\(mem) cpu=\(cpu)"
+            // PROC-04: whole bytes per second, "-" where Metr cannot measure (pids and numbers only).
+            let dr = sample.diskReadPerSec.map { String(Int($0.rounded())) } ?? "-"
+            let dw = sample.diskWritePerSec.map { String(Int($0.rounded())) } ?? "-"
+            return "probe pid=\(sample.identity.pid) mem=\(mem) cpu=\(cpu) dr=\(dr) dw=\(dw)"
         }
     }
 
