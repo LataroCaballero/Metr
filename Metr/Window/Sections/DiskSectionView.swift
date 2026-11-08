@@ -1,11 +1,15 @@
-import MetrCore
 import AppKit
+import Charts
+import MetrCore
 import MetrRender
 import SwiftUI
 
-/// The Disk section of the window (DISK-01, DISK-02; UI-SPEC "Metric Section Contracts > Disk"):
-/// every real drive the Mac has, the startup disk first, each with its free space and a used / free
-/// bar. One row per APFS container, so the six system volumes of the startup disk are one row.
+/// The Disk section of the window (WIN-02, DISK-01, DISK-02; UI-SPEC "Metric Section Contracts >
+/// Disk"). Above the list, how fast the Mac reads and writes right now (system-wide, D-08) and over
+/// the last five minutes as a mirrored chart, Read above the zero line and Write below it; free space
+/// is not charted. Below it, every real drive the Mac has, the startup disk first, each with its
+/// free space and a used / free bar. One row per APFS container, so the six system volumes of the
+/// startup disk are one row.
 ///
 /// The rows are read-only: there is no Eject button and no other action on a volume (D-17). The
 /// list is read when the window opens, on the Disk cadence and whenever a drive is mounted,
@@ -19,13 +23,40 @@ struct DiskSectionView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.accessibilitySwitchControlEnabled) private var switchControl
+    @Environment(\.colorSchemeContrast) private var contrast
 
     private let text = MetricText(locale: .current)
 
     var body: some View {
         let rows = store.volumes.value ?? []
         let unreadable = store.volumes == .unavailable
+        let ioFailed = store.diskIO == .unavailable
+        let io = store.diskIO.value
+        let tone = ChartTone(contrast: contrast)
         return Form {
+            Section {
+                VStack(alignment: .leading, spacing: 0) {
+                    // 32 pt between the two heroes (UI-SPEC); the values are 22 pt semibold digits.
+                    HStack(alignment: .top, spacing: 32) {
+                        RateHero(symbol: nil, title: String(localized: "Read"), value: text.rate(io?.readBytesPerSec))
+                        RateHero(symbol: nil, title: String(localized: "Write"), value: text.rate(io?.writeBytesPerSec))
+                    }
+                    if ioFailed {
+                        Text("Unavailable")
+                            .font(.subheadline)
+                            .foregroundStyle(Color.secondary)
+                            .padding(.top, 4)
+                    }
+                    DiskIOHistoryChart(store: store, tone: tone, text: text)
+                        .padding(.top, 8)
+                    ChartLegendRow(items: [
+                        (String(localized: "Read"), tone.seriesA),
+                        (String(localized: "Write"), tone.seriesB),
+                    ])
+                    .padding(.top, 8)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
             Section {
                 if unreadable {
                     // Calm, and it recovers by itself: the read is retried on the Disk cadence and
@@ -178,5 +209,150 @@ private struct UsageBar: View {
                         .frame(width: proxy.size.width * min(1, max(0, fraction)))
                 }
             }
+    }
+}
+
+/// The plot identifiers of the mirrored chart. Plain strings, not UI text (the chart is hidden from
+/// VoiceOver unless its summary layer is on), so the compiler does not extract them as keys.
+private enum DiskChartLabel {
+    static let read: String = "Read"
+    static let write: String = "Write"
+    static let zero: String = "Zero"
+}
+
+/// One contiguous run of disk I/O samples, ready to plot: every point has a value.
+private struct DiskIORun: Identifiable {
+    struct Point: Identifiable {
+        let id: Int
+        let date: Date
+        /// Bytes per second read.
+        let read: Double
+        /// Bytes per second written, positive; the chart plots it negated.
+        let write: Double
+    }
+
+    let id: Int
+    let points: [Point]
+}
+
+/// The mirrored chart over the store's disk I/O history: Read above the zero rule, Write below it,
+/// on a symmetric scale. Built only while the Disk section is on screen, so a hidden chart costs
+/// nothing.
+private struct DiskIOHistoryChart: View {
+    let store: MetricsStore
+    let tone: ChartTone
+    let text: MetricText
+
+    /// The quietest axis the chart shows on each side of zero, so idle noise does not fill the plot
+    /// (UI-SPEC Chart Contract, Disk: 1 MB/s).
+    private static let floor: Double = 1_000_000
+
+    /// The pointer's position over the plot, nil while it is away (the hover readout).
+    @State private var selection: Date? = initialChartSelection()
+    /// The history as it was when the pointer entered; see `CPUHistoryChart`.
+    @State private var frozen: HistoryBuffer<SeriesPair>?
+
+    var body: some View {
+        let history = frozen ?? store.diskIOHistory
+        // A pending or failed sample is a gap, never a plotted zero.
+        let runs: [DiskIORun] = ChartSegments.runs(history.samples, maxGap: 3.5).map { run in
+            DiskIORun(
+                id: run.id,
+                points: run.samples.enumerated().compactMap { index, sample in
+                    sample.value.map {
+                        DiskIORun.Point(
+                            id: index, date: HistoryChartTime.date(sample.time), read: $0.first, write: $0.second)
+                    }
+                })
+        }
+        // One sample draws a point, not a line. Pre-filtered because the Charts builder must not
+        // hold an `if` while the deployment target is below 27.
+        let singles = runs.filter { $0.points.count == 1 }
+        let end = HistoryChartTime.date(
+            history.latestTime ?? store.windowSessionStart ?? Date.now.timeIntervalSinceReferenceDate)
+
+        // The scale follows the visible peak of both series, rounded up to a step: ±M.
+        let peak = history.samples.reduce(0.0) { max($0, $1.value.map { max($0.first, $0.second) } ?? 0) }
+        let limit = RateAxis.ceiling(peak: peak, floor: Self.floor)
+
+        let readouts = ChartHoverReadout.at(selection, in: history.samples) { value in
+            [
+                .init(
+                    id: 0, swatch: tone.colorA,
+                    text: "\(String(localized: "Read")) \(text.rate(value.first))"),
+                .init(
+                    id: 1, swatch: tone.colorB,
+                    text: "\(String(localized: "Write")) \(text.rate(value.second))"),
+            ]
+        }
+
+        return Chart {
+            ForEach(runs) { run in
+                ForEach(run.points) { point in
+                    AreaMark(
+                        x: .value(ChartLabel.time, point.date), y: .value(DiskChartLabel.read, point.read),
+                        series: .value(ChartLabel.series, "read-\(run.id)"), stacking: .unstacked
+                    )
+                    .interpolationMethod(.linear)
+                    .foregroundStyle(tone.colorA)
+                    LineMark(
+                        x: .value(ChartLabel.time, point.date), y: .value(DiskChartLabel.read, point.read),
+                        series: .value(ChartLabel.series, "read-line-\(run.id)")
+                    )
+                    .interpolationMethod(.linear)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                    .foregroundStyle(tone.colorLine)
+                    AreaMark(
+                        x: .value(ChartLabel.time, point.date), y: .value(DiskChartLabel.write, -point.write),
+                        series: .value(ChartLabel.series, "write-\(run.id)"), stacking: .unstacked
+                    )
+                    .interpolationMethod(.linear)
+                    .foregroundStyle(tone.colorB)
+                    LineMark(
+                        x: .value(ChartLabel.time, point.date), y: .value(DiskChartLabel.write, -point.write),
+                        series: .value(ChartLabel.series, "write-line-\(run.id)")
+                    )
+                    .interpolationMethod(.linear)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                    .foregroundStyle(Color.primary.opacity(0.55))
+                }
+            }
+            ForEach(singles) { run in
+                ForEach(run.points) { point in
+                    PointMark(x: .value(ChartLabel.time, point.date), y: .value(DiskChartLabel.read, point.read))
+                        .symbolSize(24)
+                        .foregroundStyle(tone.colorLine)
+                    PointMark(x: .value(ChartLabel.time, point.date), y: .value(DiskChartLabel.write, -point.write))
+                        .symbolSize(24)
+                        .foregroundStyle(Color.primary.opacity(0.55))
+                }
+            }
+            // The zero line both series start from, in the grid tone.
+            RuleMark(y: .value(DiskChartLabel.zero, 0))
+                .lineStyle(StrokeStyle(lineWidth: 1))
+                .foregroundStyle(tone.colorGrid)
+            ChartReadoutRule(readouts: readouts, tone: tone)
+        }
+        // Ticks at -M, 0 and +M; the labels are absolute values with the unit, "0" at the line.
+        .historyChart(end: end, yDomain: -limit...limit, yTicks: [-limit, 0, limit], selection: $selection) { tick in
+            tick == 0 ? "0" : text.rate(abs(tick))
+        }
+        .onChange(of: selection) { _, new in
+            frozen = new == nil ? nil : (frozen ?? store.diskIOHistory)
+        }
+        .onDisappear {
+            selection = nil
+            frozen = nil
+        }
+        // The audio graph and the summary work on fractions of the axis (0...1); the formatter turns
+        // them back into rates. The summary is the I/O in both directions together.
+        .chartAccessibility(
+            metric: String(localized: "Disk"),
+            summary: ChartSummary.make(history.samples.map { $0.value.map { ($0.first + $0.second) / limit } }),
+            series: [
+                history.descriptorSeries(named: String(localized: "Read")) { $0.first / limit },
+                history.descriptorSeries(named: String(localized: "Write")) { $0.second / limit },
+            ],
+            format: { text.rate($0 * limit) })
     }
 }

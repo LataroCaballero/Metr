@@ -1603,6 +1603,30 @@
         }
       }
     },
+    "Read": {
+      "comment": "Disk section hero label and chart legend for the data read from storage",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lectura"
+          }
+        }
+      }
+    },
+    "Write": {
+      "comment": "Disk section hero label and chart legend for the data written to storage",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escritura"
+          }
+        }
+      }
+    },
     "Volumes": {
       "comment": "Disk section header above the list of drives",
       "extractionState": "manual",

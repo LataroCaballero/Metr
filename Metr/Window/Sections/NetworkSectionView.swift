@@ -85,19 +85,26 @@ struct NetworkSectionView: View {
     }
 }
 
-/// One hero value: a symbol and its label over the rate. The rate is `—` until the second sample and
-/// when the counters cannot be read.
-private struct RateHero: View {
-    let symbol: String
+/// One hero value: an optional symbol and its label over the rate. The rate is `—` until the second
+/// sample and when the counters cannot be read. Shared with the Disk section, whose heroes carry the
+/// label alone.
+struct RateHero: View {
+    let symbol: String?
     let title: String
     let value: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Label {
-                Text(verbatim: title)
-            } icon: {
-                Image(systemName: symbol)
+            Group {
+                if let symbol {
+                    Label {
+                        Text(verbatim: title)
+                    } icon: {
+                        Image(systemName: symbol)
+                    }
+                } else {
+                    Text(verbatim: title)
+                }
             }
             .font(.subheadline)
             .foregroundStyle(Color.secondary)

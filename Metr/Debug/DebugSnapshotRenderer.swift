@@ -354,6 +354,8 @@ enum DebugSnapshotRenderer {
         var network: NetworkFixtureState = .none
         /// What the volume list looks like in this fixture.
         var volumes: VolumeFixtureState = .none
+        /// What the system-wide disk read / write history looks like in this fixture.
+        var diskIO: DiskIOFixtureState = .none
         /// A preset hover position, in seconds before the newest sample: the readout is drawn as if
         /// the pointer rested there. nil = no pointer.
         var hoverSecondsAgo: Double?
@@ -390,6 +392,16 @@ enum DebugSnapshotRenderer {
         case idle
         /// The long-text case: the largest hero values the window has to fit (128.4 MB/s, 999.9 kB/s).
         case wide
+    }
+
+    private enum DiskIOFixtureState {
+        /// No disk I/O reading is fed: the heroes read the em dash.
+        case none
+        /// Five minutes of mirrored disk activity: reads in bursts, a heavier write stretch, ending on
+        /// 1.2 MB/s read and 340 kB/s write.
+        case live
+        /// The disk statistics cannot be read.
+        case unavailable
     }
 
     private enum VolumeFixtureState {
@@ -438,16 +450,19 @@ enum DebugSnapshotRenderer {
             WindowFixture(
                 name: "network-min", section: .network, populated: true, contentSize: NSSize(width: 900, height: 520),
                 network: .wide),
-            WindowFixture(name: "disk", section: .disk, populated: true, contentSize: standard, volumes: .live),
+            WindowFixture(
+                name: "disk", section: .disk, populated: true, contentSize: standard, volumes: .live, diskIO: .live),
             WindowFixture(
                 name: "disk-one", section: .disk, populated: true, contentSize: standard, volumes: .single),
             WindowFixture(
                 name: "disk-many", section: .disk, populated: true, contentSize: NSSize(width: 900, height: 520),
-                volumes: .many),
-            WindowFixture(name: "disk-low", section: .disk, populated: true, contentSize: standard, volumes: .low),
+                volumes: .many, diskIO: .live),
+            WindowFixture(
+                name: "disk-low", section: .disk, populated: true, contentSize: standard, volumes: .low,
+                diskIO: .live),
             WindowFixture(
                 name: "disk-unavailable", section: .disk, populated: true, contentSize: standard,
-                volumes: .unavailable),
+                volumes: .unavailable, diskIO: .unavailable),
             WindowFixture(
                 name: "processes", section: .processes, populated: false, contentSize: standard, processes: .live),
             WindowFixture(
@@ -566,6 +581,22 @@ enum DebugSnapshotRenderer {
             primaryInterface: "Wi-Fi", hasPrimary: true)
     }
 
+    /// The disk I/O reading of second `second` of a disk fixture: reads in short bursts, a heavier
+    /// write stretch in the middle, and a quiet tail, ending on 1.2 MB/s read and 340 kB/s write.
+    /// `unavailable` feeds the failed read for every second.
+    private static func diskIOReading(second: Int, state: DiskIOFixtureState) -> Reading<DiskIOReading>? {
+        switch state {
+        case .none: return nil
+        case .unavailable: return .unavailable
+        case .live:
+            if second == 299 { return .value(DiskIOReading(readBytesPerSec: 1_200_000, writeBytesPerSec: 340_000)) }
+            let t = Double(second)
+            let read = 60_000 + max(0, sin(t / 17)) * 5_200_000 + max(0, sin(t / 5.5)) * 900_000
+            let write = 30_000 + (120...190 ~= second ? 3_100_000 * (1 + sin(t / 4)) / 2 : 0) + max(0, sin(t / 9)) * 240_000
+            return .value(DiskIOReading(readBytesPerSec: read, writeBytesPerSec: write))
+        }
+    }
+
     /// A store holding a fixture's own history: a window session that began 300 s ago and one
     /// synthetic batch per second since, applied with explicit times so no wall clock is involved.
     private static func windowStore(for fixture: WindowFixture) -> MetricsStore {
@@ -615,6 +646,7 @@ enum DebugSnapshotRenderer {
             let batch = MetricsBatch(
                 cpu: .value(reading), memory: memoryBatch,
                 disk: second == 299 ? .value(disk) : nil, network: network, gpu: gpu,
+                diskIO: diskIOReading(second: second, state: fixture.diskIO),
                 volumes: second != 299 ? nil : volumeReading(for: fixture.volumes),
                 elapsed: 1)
             store.apply(batch, at: now - 299 + t)
