@@ -696,7 +696,17 @@ enum DebugSnapshotRenderer {
         for (index, tool) in tools.enumerated() {
             system(Int32(400 + index), uid: 0, path: tool.0, tool.1, cpu: tool.2, mib: tool.3)
         }
-        if !cpuReady {
+        if cpuReady {
+            // Own processes carry disk rates (system rows come from top and have none, so they stay
+            // nil and read "—"). A spread of sizes, some real zeros, so the unit steps are visible.
+            let me = getuid()
+            let reads: [Double] = [0, 12_400_000, 340_000, 2_100_000, 0, 880_000, 128_400_000, 45_000, 6_700_000]
+            let writes: [Double] = [340_000, 0, 5_600_000, 91_000, 18_900_000, 0, 1_300_000, 2_400_000, 700_000]
+            for index in samples.indices where samples[index].uid == me {
+                samples[index].diskReadPerSec = reads[index % reads.count]
+                samples[index].diskWritePerSec = writes[(index * 7) % writes.count]
+            }
+        } else {
             samples = samples.map { sample in
                 var pending = sample
                 pending.cpuPercent = nil

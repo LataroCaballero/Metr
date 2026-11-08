@@ -13,6 +13,9 @@ import SwiftUI
 /// host is an `NSOutlineView` (`ProcessOutlineView`) because SwiftUI's `Table` cannot mark a leaf
 /// row as not expandable; a group without helpers has no triangle (the DEBUG outline probe checks
 /// that).
+///
+/// Columns: Name, CPU, Memory, Disk Read and Disk Write. The disk rates are the user's own
+/// processes only; a system row shows a quiet "—" with a tooltip saying why (PROC-04, D-11).
 struct ProcessesSectionView: View {
     let store: MetricsStore
     let model: ProcessTableModel

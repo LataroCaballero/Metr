@@ -21,7 +21,9 @@ struct ProcessTableRow: Identifiable, Equatable {
     let isOwn: Bool
     let cpuPercent: Double?
     let footprintBytes: UInt64?
-    /// Bytes per second, nil until 03-12 reads them.
+    /// Bytes per second over the last process sample (a group's is the sum of the members that
+    /// report). Nil is "not available": a process macOS gives Metr no I/O for, or one with a single
+    /// reading so far. Never a fabricated zero (PROC-04, D-11).
     let diskReadPerSec: Double?
     let diskWritePerSec: Double?
     let helperCount: Int
@@ -238,8 +240,8 @@ final class ProcessTableModel {
             isOwn: representative?.uid == selfUID,
             cpuPercent: group.cpuPercent,
             footprintBytes: group.footprintBytes,
-            diskReadPerSec: nil,
-            diskWritePerSec: nil,
+            diskReadPerSec: group.diskReadPerSec,
+            diskWritePerSec: group.diskWritePerSec,
             helperCount: group.helpers.count,
             children: order.compactMap { childRows[$0] })
     }
@@ -260,8 +262,8 @@ final class ProcessTableModel {
             isOwn: sample.uid == selfUID,
             cpuPercent: sample.cpuPercent,
             footprintBytes: sample.footprintBytes,
-            diskReadPerSec: nil,
-            diskWritePerSec: nil,
+            diskReadPerSec: sample.diskReadPerSec,
+            diskWritePerSec: sample.diskWritePerSec,
             helperCount: 0,
             children: [])
     }

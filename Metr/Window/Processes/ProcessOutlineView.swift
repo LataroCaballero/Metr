@@ -42,12 +42,20 @@ struct ProcessOutlineView: NSViewRepresentable {
         outline.autoresizesOutlineColumn = false
         outline.focusRingType = .none
         outline.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+        // The columns are laid out edge to edge: the default 17 pt between columns would push the
+        // five of them past the 900 pt window minimum (UI-SPEC sums the widths without it). The
+        // cells carry their own padding instead.
+        outline.intercellSpacing = NSSize(width: 0, height: outline.intercellSpacing.height)
         outline.setAccessibilityLabel(String(localized: "Processes"))
 
         let name = Self.column(.name, title: String(localized: "Name"), width: nil, ascending: true)
         let cpu = Self.column(.cpu, title: String(localized: "CPU"), width: 72, ascending: false)
         let memory = Self.column(.memory, title: String(localized: "Memory"), width: 88, ascending: false)
-        for column in [name, cpu, memory] { outline.addTableColumn(column) }
+        let diskRead = Self.column(
+            .diskRead, title: String(localized: "Disk Read"), width: 140, ascending: false)
+        let diskWrite = Self.column(
+            .diskWrite, title: String(localized: "Disk Write"), width: 140, ascending: false)
+        for column in [name, cpu, memory, diskRead, diskWrite] { outline.addTableColumn(column) }
         outline.outlineTableColumn = name
 
         outline.dataSource = coordinator
@@ -87,7 +95,7 @@ struct ProcessOutlineView: NSViewRepresentable {
             column.headerCell.alignment = .right
         } else {
             column.minWidth = 200
-            column.width = 320
+            column.width = 200
             column.resizingMask = .autoresizingMask
         }
         return column
@@ -272,18 +280,31 @@ struct ProcessOutlineView: NSViewRepresentable {
                 return numberCell(in: outlineView, identifier: identifier, text: text.processCPU(row.cpuPercent), active: lastActive == .cpu)
             case .memory:
                 return numberCell(in: outlineView, identifier: identifier, text: text.processMemory(row.footprintBytes), active: lastActive == .memory)
-            case .diskRead, .diskWrite:
-                return nil
+            case .diskRead:
+                return numberCell(
+                    in: outlineView, identifier: identifier, text: text.rate(row.diskReadPerSec),
+                    active: lastActive == .diskRead, help: Self.diskHelp(for: row))
+            case .diskWrite:
+                return numberCell(
+                    in: outlineView, identifier: identifier, text: text.rate(row.diskWritePerSec),
+                    active: lastActive == .diskWrite, help: Self.diskHelp(for: row))
             }
         }
 
+        /// The explanation under a quiet "—" in the disk columns of another user's or root's row:
+        /// macOS's top has no per-process I/O, so Metr says so instead of showing a zero (D-11).
+        private static func diskHelp(for row: ProcessTableRow) -> String? {
+            row.isOwn ? nil : String(localized: "Disk activity isn't available for system processes.")
+        }
+
         private func numberCell(
-            in outlineView: NSOutlineView, identifier: NSUserInterfaceItemIdentifier, text: String, active: Bool
+            in outlineView: NSOutlineView, identifier: NSUserInterfaceItemIdentifier, text: String, active: Bool,
+            help: String? = nil
         ) -> NSView {
             let cell =
                 outlineView.makeView(withIdentifier: identifier, owner: nil) as? NumberCellView
                 ?? NumberCellView(identifier: identifier)
-            cell.configure(text: text, active: active)
+            cell.configure(text: text, active: active, help: help)
             return cell
         }
 
@@ -361,7 +382,7 @@ private final class NameCellView: NSTableCellView {
         textField = label
 
         NSLayoutConstraint.activate([
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: 20),
             iconView.heightAnchor.constraint(equalToConstant: 20),
@@ -409,7 +430,7 @@ private final class NumberCellView: NSTableCellView {
         textField = label
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
@@ -417,9 +438,10 @@ private final class NumberCellView: NSTableCellView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    func configure(text: String, active: Bool) {
+    func configure(text: String, active: Bool, help: String? = nil) {
         label.stringValue = text
         label.font = active ? Self.semibold : Self.regular
         label.textColor = active ? .labelColor : .secondaryLabelColor
+        toolTip = help
     }
 }

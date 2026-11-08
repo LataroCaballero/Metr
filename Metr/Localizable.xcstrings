@@ -1711,6 +1711,42 @@
         }
       }
     },
+    "Disk Read": {
+      "comment": "Process table column title for a process's disk read rate",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lectura de disco"
+          }
+        }
+      }
+    },
+    "Disk Write": {
+      "comment": "Process table column title for a process's disk write rate",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escritura de disco"
+          }
+        }
+      }
+    },
+    "Disk activity isn't available for system processes.": {
+      "comment": "Tooltip on the quiet dash in the Disk Read and Disk Write columns of another user's or root's process rows, which macOS gives no per-process I/O",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La actividad de disco no está disponible para procesos del sistema."
+          }
+        }
+      }
+    },
     "Name": {
       "comment": "Process table column title for the app or process name",
       "extractionState": "manual",
