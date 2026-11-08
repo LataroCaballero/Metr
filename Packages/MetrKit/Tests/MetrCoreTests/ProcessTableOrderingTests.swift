@@ -180,4 +180,34 @@ import Testing
                 withNew, column: .memory, ascending: false, cpuReady: true, previous: frozenCPUOrder,
                 frozen: true, sortChanged: true) == ["d", "b", "c", "a"])
     }
+
+    /// PROC-04: two rates that read the same at the displayed unit keep their previous order; the
+    /// ties fall back to memory (largest first), then name; a row with no rate sorts last either way.
+    @Test func diskColumnsTieAndOrder() {
+        for column in [ProcessTableColumn.diskRead, .diskWrite] {
+            func rated(_ id: String, _ rate: Double?, memory: UInt64? = nil, name: String? = nil) -> ProcessTableItem {
+                column == .diskRead
+                    ? item(id, memory: memory, name: name, read: rate)
+                    : item(id, memory: memory, name: name, write: rate)
+            }
+            // 1_000_400 and 1_000_100 both read "1.0 MB/s".
+            let pair = [rated("a", 1_000_400), rated("b", 1_000_100)]
+            #expect(order(pair, column, ascending: false, previous: ["b", "a"]) == ["b", "a"])
+            #expect(order(pair, column, ascending: false, previous: ["a", "b"]) == ["a", "b"])
+            #expect(order(pair, column, ascending: true, previous: ["b", "a"]) == ["b", "a"])
+
+            // No previous order: equal at the unit, then memory descending, then name ascending.
+            let tied = [
+                rated("small", 1_000_100, memory: 10 * mib, name: "alpha"),
+                rated("big", 1_000_400, memory: 900 * mib, name: "zeta"),
+                rated("bName", 1_000_200, memory: 10 * mib, name: "beta"),
+            ]
+            #expect(order(tied, column, ascending: false) == ["big", "small", "bName"])
+
+            // Real differences still order, and a missing rate is last in both directions.
+            let mixed = [rated("none", nil, memory: 9_000 * mib), rated("slow", 5_000), rated("fast", 3_000_000)]
+            #expect(order(mixed, column, ascending: false) == ["fast", "slow", "none"])
+            #expect(order(mixed, column, ascending: true) == ["slow", "fast", "none"])
+        }
+    }
 }
