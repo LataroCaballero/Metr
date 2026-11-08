@@ -31,9 +31,14 @@ private final class FakeProcesses: Sendable {
     func askedPath(for pid: Int32) -> Bool { state.withLock { $0.pathAsked.contains(pid) } }
 
     func set(_ entries: [ProcessEntry]?) { state.withLock { $0.entries = entries } }
-    func setUsage(_ pid: Int32, cpuSeconds: Double, footprint: UInt64 = 50_000_000) {
+    func setUsage(
+        _ pid: Int32, cpuSeconds: Double, footprint: UInt64 = 50_000_000,
+        diskRead: UInt64 = 0, diskWritten: UInt64 = 0
+    ) {
         state.withLock {
-            $0.usage[pid] = ProcessUsage(cpuNanos: UInt64(cpuSeconds * 1e9), footprintBytes: footprint)
+            $0.usage[pid] = ProcessUsage(
+                cpuNanos: UInt64(cpuSeconds * 1e9), footprintBytes: footprint,
+                diskReadBytes: diskRead, diskWrittenBytes: diskWritten)
         }
     }
     func advance(seconds: Double) { state.withLock { $0.now += UInt64(seconds * 1e9) } }
@@ -161,6 +166,113 @@ private func footprint() -> UInt64 {
         let third = try #require(collector.sample().value)
         #expect(third.processes[0].cpuPercent == nil, "reset must make the next sample a baseline again")
         #expect(!third.cpuReady)
+    }
+
+    // MARK: Disk rates (PROC-04, D-11)
+
+    /// Rates are the counter delta over the same window as CPU; the first reading has none; a
+    /// window under the minimum carries the last rates and keeps the baseline.
+    @Test func diskRatesFollowTheCPUWindow() throws {
+        let fake = FakeProcesses()
+        fake.set([fake.entry(10)])
+        fake.setUsage(10, cpuSeconds: 1, diskRead: 100_000_000, diskWritten: 50_000_000)
+        let collector = ProcessCollector(sources: fake.sources, minimumCPUWindowNanos: 500_000_000)
+        let first = try #require(collector.sample().value?.processes.first)
+        #expect(first.diskReadPerSec == nil)
+        #expect(first.diskWritePerSec == nil)
+
+        fake.advance(seconds: 2)
+        fake.setUsage(10, cpuSeconds: 2, diskRead: 110_000_000, diskWritten: 54_000_000)
+        let second = try #require(collector.sample().value?.processes.first)
+        #expect(second.diskReadPerSec == 5_000_000)
+        #expect(second.diskWritePerSec == 2_000_000)
+
+        fake.advance(seconds: 0.1)  // under the floor: carried, baseline kept
+        fake.setUsage(10, cpuSeconds: 2.1, diskRead: 110_900_000, diskWritten: 54_100_000)
+        let carried = try #require(collector.sample().value?.processes.first)
+        #expect(carried.diskReadPerSec == 5_000_000)
+        #expect(carried.diskWritePerSec == 2_000_000)
+
+        fake.advance(seconds: 1.9)  // 2.0 s since the kept baseline
+        fake.setUsage(10, cpuSeconds: 3, diskRead: 112_000_000, diskWritten: 54_000_000 + 6_000_000)
+        let next = try #require(collector.sample().value?.processes.first)
+        #expect(next.diskReadPerSec == 1_000_000)
+        #expect(next.diskWritePerSec == 3_000_000)
+    }
+
+    /// An idle process that has two readings reads a real zero, not nil.
+    @Test func anIdleProcessReadsARealZero() throws {
+        let fake = FakeProcesses()
+        fake.set([fake.entry(10)])
+        fake.setUsage(10, cpuSeconds: 1, diskRead: 7_000, diskWritten: 9_000)
+        let collector = ProcessCollector(sources: fake.sources)
+        _ = collector.sample()
+        fake.advance(seconds: 2)
+        fake.setUsage(10, cpuSeconds: 1, diskRead: 7_000, diskWritten: 9_000)
+        let sample = try #require(collector.sample().value?.processes.first)
+        #expect(sample.diskReadPerSec == 0)
+        #expect(sample.diskWritePerSec == 0)
+    }
+
+    /// T-03-23: a pid reused by a new process never inherits the old counters.
+    @Test func reusedPidStartsOver() throws {
+        let fake = FakeProcesses()
+        fake.set([fake.entry(10, start: 1_000)])
+        fake.setUsage(10, cpuSeconds: 5, diskRead: 900_000_000, diskWritten: 900_000_000)
+        let collector = ProcessCollector(sources: fake.sources)
+        _ = collector.sample()
+        fake.advance(seconds: 2)
+        fake.set([fake.entry(10, start: 2_000)])
+        fake.setUsage(10, cpuSeconds: 0.1, diskRead: 4_000, diskWritten: 4_000)
+        let sample = try #require(collector.sample().value?.processes.first)
+        #expect(sample.diskReadPerSec == nil)
+        #expect(sample.diskWritePerSec == nil)
+    }
+
+    /// A counter that went down is not a negative rate and not a huge unsigned wrap: nil, rebased.
+    @Test func backwardsCounterIsNotARate() throws {
+        let fake = FakeProcesses()
+        fake.set([fake.entry(10)])
+        fake.setUsage(10, cpuSeconds: 1, diskRead: 80_000_000, diskWritten: 80_000_000)
+        let collector = ProcessCollector(sources: fake.sources)
+        _ = collector.sample()
+        fake.advance(seconds: 2)
+        fake.setUsage(10, cpuSeconds: 2, diskRead: 10_000, diskWritten: 90_000_000)
+        let broken = try #require(collector.sample().value?.processes.first)
+        #expect(broken.diskReadPerSec == nil, "the read counter decreased")
+        #expect(broken.diskWritePerSec == 5_000_000, "the write counter is still good")
+
+        fake.advance(seconds: 2)
+        fake.setUsage(10, cpuSeconds: 3, diskRead: 4_010_000, diskWritten: 90_000_000)
+        let rebased = try #require(collector.sample().value?.processes.first)
+        #expect(rebased.diskReadPerSec == 2_000_000, "measured from the rebased counter")
+    }
+
+    @Test func resetClearsTheDiskBaselines() throws {
+        let fake = FakeProcesses()
+        fake.set([fake.entry(10)])
+        fake.setUsage(10, cpuSeconds: 1, diskRead: 1_000_000_000, diskWritten: 1_000_000_000)
+        let collector = ProcessCollector(sources: fake.sources)
+        _ = collector.sample()
+        fake.advance(seconds: 2)
+        fake.setUsage(10, cpuSeconds: 2, diskRead: 1_002_000_000, diskWritten: 1_004_000_000)
+        let measured = try #require(collector.sample().value?.processes.first)
+        #expect(measured.diskReadPerSec == 1_000_000)
+        #expect(measured.diskWritePerSec == 2_000_000)
+
+        // The sleep: reset() is what suspend and onBaseline call; the counters grew while asleep.
+        collector.reset()
+        fake.advance(seconds: 1)
+        fake.setUsage(10, cpuSeconds: 3, diskRead: 1_502_000_000, diskWritten: 1_504_000_000)
+        let afterWake = try #require(collector.sample().value?.processes.first)
+        #expect(afterWake.diskReadPerSec == nil, "no rate may span the sleep")
+        #expect(afterWake.diskWritePerSec == nil)
+
+        fake.advance(seconds: 2)
+        fake.setUsage(10, cpuSeconds: 4, diskRead: 1_504_000_000, diskWritten: 1_506_000_000)
+        let next = try #require(collector.sample().value?.processes.first)
+        #expect(next.diskReadPerSec == 1_000_000, "only the post-reset delta")
+        #expect(next.diskWritePerSec == 1_000_000)
     }
 
     /// The real host: two samples 600 ms apart contain this test process.
@@ -330,6 +442,26 @@ private final class FakeTop: TopSnapshotSource, Sendable {
         let second = try #require(collector.sample().value)
         #expect(second.processes.first { $0.identity.pid == 900 }?.cpuPercent == 12.5)
         #expect(second.processes.first { $0.identity.pid == 901 }?.footprintBytes == 70_000_000)
+    }
+
+    /// D-11: top has no per-process I/O, so another user's row says nothing, never a zero.
+    @Test func otherUsersHaveNoDiskRates() throws {
+        let (fake, top) = fixture()
+        fake.set([fake.entry(10), fake.entry(900, uid: 0)])
+        fake.setUsage(10, cpuSeconds: 1, diskRead: 1_000, diskWritten: 1_000)
+        let rows = [TopRow(pid: 900, cpuPercent: 12.5, footprintBytes: 600_000_000)]
+        let collector = ProcessCollector(sources: fake.sources, top: top)
+        top.set(state: .running, block: FakeTop.block(sequence: 1, rows: rows))
+        _ = collector.sample()
+        fake.advance(seconds: 2)
+        fake.setUsage(10, cpuSeconds: 2, diskRead: 5_001_000, diskWritten: 1_000)
+        top.set(state: .running, block: FakeTop.block(sequence: 2, rows: rows))
+        let snapshot = try #require(collector.sample().value)
+        let own = try #require(snapshot.processes.first { $0.identity.pid == 10 })
+        #expect(own.diskReadPerSec == 2_500_000)
+        let ws = try #require(snapshot.processes.first { $0.identity.pid == 900 })
+        #expect(ws.diskReadPerSec == nil)
+        #expect(ws.diskWritePerSec == nil)
     }
 
     /// T-02-15: a pid reused by a process that started after the block's window began never

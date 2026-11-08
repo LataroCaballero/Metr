@@ -57,10 +57,15 @@ public struct ProcessGroup: Sendable, Equatable {
     public var cpuPercent: Double?
     /// The sum of the members' known footprints, nil only when no member has one.
     public var footprintBytes: UInt64?
+    /// The sum of the members' known disk read rates, nil only when no member reports one (D-11).
+    public var diskReadPerSec: Double?
+    /// The sum of the members' known disk write rates, nil only when no member reports one.
+    public var diskWritePerSec: Double?
 
     public init(
         id: String, appPath: String?, main: ProcessSample?, helpers: [ProcessSample],
-        cpuPercent: Double?, footprintBytes: UInt64?
+        cpuPercent: Double?, footprintBytes: UInt64?,
+        diskReadPerSec: Double? = nil, diskWritePerSec: Double? = nil
     ) {
         self.id = id
         self.appPath = appPath
@@ -68,6 +73,8 @@ public struct ProcessGroup: Sendable, Equatable {
         self.helpers = helpers
         self.cpuPercent = cpuPercent
         self.footprintBytes = footprintBytes
+        self.diskReadPerSec = diskReadPerSec
+        self.diskWritePerSec = diskWritePerSec
     }
 }
 

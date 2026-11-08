@@ -138,4 +138,36 @@ import Testing
         #expect(known.cpuPercent == 7)
         #expect(known.footprintBytes == 5)
     }
+
+    // MARK: Disk rates (PROC-04, D-11)
+
+    @Test func groupDiskRatesSumKnownMembers() {
+        let app = "/Applications/Foo.app"
+        func member(_ pid: Int32, path: String, read: Double?, write: Double?) -> ProcessSample {
+            var s = sample(pid, path: path)
+            s.diskReadPerSec = read
+            s.diskWritePerSec = write
+            return s
+        }
+        let mixed = [
+            member(1, path: app + "/Contents/MacOS/Foo", read: 1_000, write: 10),
+            member(2, path: app + "/Contents/Helpers/H1", read: nil, write: nil),
+            member(3, path: app + "/Contents/Helpers/H2", read: 3_000, write: 20),
+        ]
+        let group = ProcessGrouping.groups(from: mixed, regularAppBundlePaths: [])[0]
+        #expect(group.diskReadPerSec == 4_000)
+        #expect(group.diskWritePerSec == 30)
+
+        let none = [
+            member(1, path: app + "/Contents/MacOS/Foo", read: nil, write: nil),
+            member(2, path: app + "/Contents/Helpers/H1", read: nil, write: nil),
+        ]
+        let blank = ProcessGrouping.groups(from: none, regularAppBundlePaths: [])[0]
+        #expect(blank.diskReadPerSec == nil)
+        #expect(blank.diskWritePerSec == nil)
+
+        let zero = [member(1, path: app + "/Contents/MacOS/Foo", read: 0, write: 0)]
+        let real = ProcessGrouping.groups(from: zero, regularAppBundlePaths: [])[0]
+        #expect(real.diskReadPerSec == 0, "a measured zero is a real zero, not a missing rate")
+    }
 }

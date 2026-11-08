@@ -33,10 +33,18 @@ public struct ProcessUsage: Sendable, Equatable {
     public var cpuNanos: UInt64
     /// Physical footprint in bytes: what Activity Monitor calls Memory (D-11).
     public var footprintBytes: UInt64
+    /// Bytes the process has read from storage since it started (`ri_diskio_bytesread`).
+    public var diskReadBytes: UInt64
+    /// Bytes the process has written to storage since it started (`ri_diskio_byteswritten`).
+    public var diskWrittenBytes: UInt64
 
-    public init(cpuNanos: UInt64, footprintBytes: UInt64) {
+    public init(
+        cpuNanos: UInt64, footprintBytes: UInt64, diskReadBytes: UInt64 = 0, diskWrittenBytes: UInt64 = 0
+    ) {
         self.cpuNanos = cpuNanos
         self.footprintBytes = footprintBytes
+        self.diskReadBytes = diskReadBytes
+        self.diskWrittenBytes = diskWrittenBytes
     }
 }
 
@@ -52,10 +60,17 @@ public struct ProcessSample: Sendable, Equatable {
     /// Nil is pending: CPU needs two readings (D-20). Never a fabricated zero.
     public var cpuPercent: Double?
     public var footprintBytes: UInt64?
+    /// Bytes per second read from storage over the last full window. Nil is pending (the first
+    /// reading, a backwards counter, right after a wake) or not measurable (other users' and root
+    /// processes come from top, which has no per-process I/O). Never a fabricated zero (D-11).
+    public var diskReadPerSec: Double?
+    /// Bytes per second written to storage, with the same nil rules as `diskReadPerSec`.
+    public var diskWritePerSec: Double?
 
     public init(
         identity: ProcessIdentity, ppid: Int32, uid: UInt32, path: String?, command: String,
-        cpuPercent: Double?, footprintBytes: UInt64?
+        cpuPercent: Double?, footprintBytes: UInt64?,
+        diskReadPerSec: Double? = nil, diskWritePerSec: Double? = nil
     ) {
         self.identity = identity
         self.ppid = ppid
@@ -64,6 +79,8 @@ public struct ProcessSample: Sendable, Equatable {
         self.command = command
         self.cpuPercent = cpuPercent
         self.footprintBytes = footprintBytes
+        self.diskReadPerSec = diskReadPerSec
+        self.diskWritePerSec = diskWritePerSec
     }
 }
 
