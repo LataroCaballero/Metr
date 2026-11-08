@@ -32,8 +32,27 @@ public struct RowDiff: Sendable, Equatable {
     /// How much animating there is to do.
     public var operationCount: Int { removed.count + moves.count + inserted.count }
 
+    /// Ids are unique within a list. Rows in both lists keep their relative order unless a move says
+    /// otherwise; a row that jumps far is one move, not one per row it passed.
     public static func between(old: [String], new: [String]) -> RowDiff {
-        RowDiff(removed: [], moves: [], inserted: [])
+        let oldSet = Set(old)
+        let newSet = Set(new)
+        var removed = IndexSet()
+        for (index, id) in old.enumerated() where !newSet.contains(id) { removed.insert(index) }
+        var inserted = IndexSet()
+        for (index, id) in new.enumerated() where !oldSet.contains(id) { inserted.insert(index) }
+
+        // What is left after the removals, walked into the order the new list gives those rows.
+        var current = old.filter { newSet.contains($0) }
+        let target = new.filter { oldSet.contains($0) }
+        var moves: [Move] = []
+        for index in target.indices where current[index] != target[index] {
+            guard let from = current[index...].firstIndex(of: target[index]) else { continue }
+            let id = current.remove(at: from)
+            current.insert(id, at: index)
+            moves.append(Move(from: from, to: index))
+        }
+        return RowDiff(removed: removed, moves: moves, inserted: inserted)
     }
 
     /// Applies the operations to `old` the way an outline would, giving the list they describe.
