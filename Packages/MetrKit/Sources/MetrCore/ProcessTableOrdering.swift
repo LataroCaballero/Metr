@@ -112,7 +112,7 @@ public enum ProcessTableOrdering {
     /// the effective column stands in for CPU, the direction is that column's default.
     public static func next(
         _ items: [ProcessTableItem], column: ProcessTableColumn, ascending: Bool, cpuReady: Bool,
-        previous: [String], frozen: Bool
+        previous: [String], frozen: Bool, sortChanged: Bool = false
     ) -> [String] {
         if frozen, !previous.isEmpty {
             let present = Set(items.map(\.id))

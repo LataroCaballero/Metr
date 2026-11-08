@@ -146,4 +146,38 @@ import Testing
         #expect(below <= above)
         #expect(above < big)
     }
+
+    @Test func helpersFollowTheColumn() {
+        let helpers = [
+            item("h1", memory: 10 * mib, name: "Utility"), item("h2", memory: 30 * mib, name: "Renderer"),
+            item("h3", memory: 20 * mib, name: "GPU Process"),
+        ]
+        #expect(order(helpers, .memory, ascending: false) == ["h2", "h3", "h1"])
+        #expect(order(helpers, .memory, ascending: true) == ["h1", "h3", "h2"])
+        let named = [item("u", name: "Utility"), item("r", name: "Renderer")]
+        #expect(order(named, .name, ascending: true) == ["r", "u"])
+    }
+
+    @Test func headerChoiceBeatsTheFreeze() {
+        // The rows were frozen in CPU order; the user clicks Memory.
+        let items = [
+            item("a", cpu: 50, memory: 1 * mib), item("b", cpu: 20, memory: 9 * mib),
+            item("c", cpu: 80, memory: 5 * mib),
+        ]
+        let frozenCPUOrder = ["c", "a", "b"]
+        let held = ProcessTableOrdering.next(
+            items, column: .memory, ascending: false, cpuReady: true, previous: frozenCPUOrder,
+            frozen: true, sortChanged: false)
+        #expect(held == frozenCPUOrder)
+        let applied = ProcessTableOrdering.next(
+            items, column: .memory, ascending: false, cpuReady: true, previous: frozenCPUOrder,
+            frozen: true, sortChanged: true)
+        #expect(applied == ["b", "c", "a"])
+        // A new row also enters at once, because the order is rebuilt rather than held.
+        let withNew = items + [item("d", cpu: 1, memory: 99 * mib)]
+        #expect(
+            ProcessTableOrdering.next(
+                withNew, column: .memory, ascending: false, cpuReady: true, previous: frozenCPUOrder,
+                frozen: true, sortChanged: true) == ["d", "b", "c", "a"])
+    }
 }
