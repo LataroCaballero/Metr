@@ -3,14 +3,16 @@ import MetrCore
 import MetrRender
 import SwiftUI
 
-/// The Processes section (WIN-04): every process on the Mac in a native `Table`, grouped by app the
-/// way the panel groups them, with a standard outline disclosure that lists all of a group's helpers
-/// (D-14). The table fills the detail area edge to edge: system column headers, alternating rows
-/// and selection are drawn by the system, and nothing here adds a background (UI-SPEC Processes).
+/// The Processes section (WIN-04): every process on the Mac in a native outline table, grouped by
+/// app the way the panel groups them, with a standard outline disclosure that lists all of a
+/// group's helpers (D-14). The table fills the detail area edge to edge: system column headers,
+/// alternating rows and selection are drawn by the system, and nothing here adds a background
+/// (UI-SPEC Processes).
 ///
-/// Rows come from `ProcessTableModel`, which orders them; the table never sorts its own data. Every
-/// row is a `DisclosureTableRow` because the rows builder has no conditionals; a group without
-/// helpers has an empty child list and so no triangle (the DEBUG outline probe checks that).
+/// Rows come from `ProcessTableModel`, which orders them; the table never sorts its own data. The
+/// host is an `NSOutlineView` (`ProcessOutlineView`) because SwiftUI's `Table` cannot mark a leaf
+/// row as not expandable; a group without helpers has no triangle (the DEBUG outline probe checks
+/// that).
 struct ProcessesSectionView: View {
     let store: MetricsStore
     let model: ProcessTableModel
@@ -56,28 +58,9 @@ struct ProcessesSectionView: View {
     private func table(for snapshot: ProcessSnapshot) -> some View {
         let rows = model.rows(for: snapshot)
         let active = ProcessTableOrdering.effectiveColumn(model.column, cpuReady: snapshot.cpuReady)
-        let selection = Binding<Set<String>>(
-            get: { model.selection }, set: { model.selection = $0 })
-        return Table(of: ProcessTableRow.self, selection: selection) {
-            TableColumn("Name") { row in
-                nameCell(row)
-            }
-            .width(min: 200)
-            TableColumn("CPU") { row in
-                numberCell(text.processCPU(row.cpuPercent), active: active == .cpu)
-            }
-            .width(72)
-            TableColumn("Memory") { row in
-                numberCell(text.processMemory(row.footprintBytes), active: active == .memory)
-            }
-            .width(88)
-        } rows: {
-            ForEach(rows) { row in
-                DisclosureTableRow(row, isExpanded: model.binding(expandedFor: row.id)) {
-                    ForEach(row.children) { TableRow($0) }
-                }
-            }
-        }
+        let ascending = active == model.column ? model.ascending : ProcessTableOrdering.defaultAscending(active)
+        return ProcessOutlineView(
+            model: model, rows: rows, active: active, activeAscending: ascending, text: text)
         .onChange(of: snapshot.sequence) { model.prune() }
         #if DEBUG
         .task(id: rows.isEmpty) {
@@ -86,45 +69,6 @@ struct ProcessesSectionView: View {
             OutlineProbe.log(model: model)
         }
         #endif
-    }
-
-    /// 20 pt icon · 8 · name (13 pt, tail truncation) · 4 · lock on system rows. The full name and
-    /// the PID are in the `.help`; a helper's name is secondary so the apps read first.
-    private func nameCell(_ row: ProcessTableRow) -> some View {
-        HStack(spacing: 8) {
-            Image(nsImage: row.icon)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 20, height: 20)
-                .accessibilityHidden(true)
-            HStack(spacing: 4) {
-                Text(verbatim: row.name)
-                    .font(.system(size: 13))
-                    .foregroundStyle(row.isHelper ? Color.secondary : Color.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                if row.kind == .system {
-                    Image(systemName: "lock.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(Color.secondary)
-                        .layoutPriority(1)
-                        .accessibilityHidden(true)
-                }
-            }
-        }
-        .help(row.help)
-    }
-
-    /// A trailing number that never truncates. The sorted column is semibold primary and the others
-    /// regular secondary, following the effective sort (UI-SPEC Typography).
-    private func numberCell(_ value: String, active: Bool) -> some View {
-        Text(verbatim: value)
-            .font(.system(size: 13, weight: active ? .semibold : .regular))
-            .foregroundStyle(active ? Color.primary : Color.secondary)
-            .monospacedDigit()
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 
