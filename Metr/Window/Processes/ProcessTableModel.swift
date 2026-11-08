@@ -74,7 +74,15 @@ final class ProcessTableModel {
     @ObservationIgnored private var previousChildren: [String: [String]] = [:]
     @ObservationIgnored private var memo: (key: MemoKey, rows: [ProcessTableRow])?
     @ObservationIgnored private var liveIDs: Set<String> = []
-    @ObservationIgnored private var loggedSequence: UInt64?
+    @ObservationIgnored private var loggedKey: String?
+    /// The sort the rows were last built with, so the first build after a header click knows it must
+    /// ignore the freeze.
+    @ObservationIgnored private var builtSort: Sort?
+
+    private struct Sort: Equatable {
+        var column: ProcessTableColumn
+        var ascending: Bool
+    }
 
     private struct MemoKey: Equatable {
         var sequence: UInt64
@@ -142,6 +150,8 @@ final class ProcessTableModel {
         if let memo, memo.key == key { return memo.rows }
 
         let effective = ProcessTableOrdering.effectiveColumn(column, cpuReady: snapshot.cpuReady)
+        let sortChanged = builtSort != nil && builtSort != Sort(column: column, ascending: ascending)
+        builtSort = Sort(column: column, ascending: ascending)
         let live = groups(for: snapshot)
         let me = getuid()
         let pid = getpid()
@@ -152,7 +162,9 @@ final class ProcessTableModel {
         var ids: Set<String> = []
         var helperTotal = 0
         for group in live {
-            let row = row(for: group, snapshot: snapshot, selfPID: pid, selfUID: me, children: &newChildren)
+            let row = row(
+                for: group, snapshot: snapshot, selfPID: pid, selfUID: me, sortChanged: sortChanged,
+                children: &newChildren)
             guard rowsByID[group.id] == nil else { continue }
             rowsByID[group.id] = row
             items.append(
@@ -166,7 +178,7 @@ final class ProcessTableModel {
         }
         let order = ProcessTableOrdering.next(
             items, column: column, ascending: ascending, cpuReady: snapshot.cpuReady,
-            previous: previousGroups, frozen: isFrozen)
+            previous: previousGroups, frozen: isFrozen, sortChanged: sortChanged)
         let rows = order.compactMap { rowsByID[$0] }
 
         previousGroups = order
@@ -190,7 +202,7 @@ final class ProcessTableModel {
 
     private func row(
         for group: ProcessGroup, snapshot: ProcessSnapshot, selfPID: Int32, selfUID: UInt32,
-        children newChildren: inout [String: [String]]
+        sortChanged: Bool, children newChildren: inout [String: [String]]
     ) -> ProcessTableRow {
         let appName = group.appPath.map(naming.appDisplayName(atPath:))
         let name = appName ?? naming.standaloneName(of: group)
@@ -210,7 +222,7 @@ final class ProcessTableModel {
         }
         let order = ProcessTableOrdering.next(
             items, column: column, ascending: ascending, cpuReady: snapshot.cpuReady,
-            previous: previousChildren[group.id] ?? [], frozen: isFrozen)
+            previous: previousChildren[group.id] ?? [], frozen: isFrozen, sortChanged: sortChanged)
         newChildren[group.id] = order
 
         let representative = group.main ?? group.helpers.min { $0.identity.pid < $1.identity.pid }
@@ -262,8 +274,9 @@ final class ProcessTableModel {
         sequence: UInt64, rows: [ProcessTableRow], helpers: Int, effective: ProcessTableColumn, ready: Bool
     ) {
         #if DEBUG
-        guard loggedSequence != sequence else { return }
-        loggedSequence = sequence
+        let key = "\(sequence)/\(column.rawValue)/\(ascending)"
+        guard loggedKey != key else { return }
+        loggedKey = key
         let visible = rows.count + rows.filter { expanded.contains($0.id) }.reduce(0) { $0 + $1.children.count }
         let direction = (effective == column ? ascending : ProcessTableOrdering.defaultAscending(effective)) ? "asc" : "desc"
         DebugHooks.log(

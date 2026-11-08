@@ -357,6 +357,19 @@ enum DebugSnapshotRenderer {
         /// A preset hover position, in seconds before the newest sample: the readout is drawn as if
         /// the pointer rested there. nil = no pointer.
         var hoverSecondsAgo: Double?
+        /// What the process list looks like in this fixture.
+        var processes: ProcessFixtureState = .none
+    }
+
+    private enum ProcessFixtureState {
+        /// No process reading is fed.
+        case none
+        /// About 40 rows, Chrome open with its helpers, CPU known.
+        case live
+        /// The first reading: no CPU yet, so the rows are in Memory order and CPU reads the em dash.
+        case pending
+        /// The process list cannot be read.
+        case unavailable
     }
 
     private enum MemoryFixtureState {
@@ -435,6 +448,17 @@ enum DebugSnapshotRenderer {
             WindowFixture(
                 name: "disk-unavailable", section: .disk, populated: true, contentSize: standard,
                 volumes: .unavailable),
+            WindowFixture(
+                name: "processes", section: .processes, populated: false, contentSize: standard, processes: .live),
+            WindowFixture(
+                name: "processes-pending", section: .processes, populated: false, contentSize: standard,
+                processes: .pending),
+            WindowFixture(
+                name: "processes-error", section: .processes, populated: false, contentSize: standard,
+                processes: .unavailable),
+            WindowFixture(
+                name: "processes-min", section: .processes, populated: false,
+                contentSize: NSSize(width: 900, height: 520), processes: .live),
         ]
     }
 
@@ -559,6 +583,7 @@ enum DebugSnapshotRenderer {
             store.apply(
                 MetricsBatch(
                     memory: .value(memory), disk: .value(disk),
+                    processes: processReading(for: fixture.processes),
                     gpu: fixture.gpu == .unavailable ? .unavailable : nil, elapsed: 1),
                 at: now)
             return store
@@ -597,6 +622,58 @@ enum DebugSnapshotRenderer {
         return store
     }
 
+    /// What the store is told about the processes: nothing for a fixture without any, an unreadable
+    /// list, the first reading (no CPU yet) or the full set.
+    private static func processReading(for state: ProcessFixtureState) -> Reading<ProcessSnapshot>? {
+        switch state {
+        case .none: return nil
+        case .unavailable: return .unavailable
+        case .live: return .value(processTableSnapshot(cpuReady: true))
+        case .pending: return .value(processTableSnapshot(cpuReady: false))
+        }
+    }
+
+    /// About 40 rows for the Processes table: the `apps` set (Chrome with 14 helpers, Safari, Xcode,
+    /// a compiler), WindowServer and kernel_task (they show the lock), and a few standalone tools.
+    private static func processTableSnapshot(cpuReady: Bool) -> ProcessSnapshot {
+        let mib: UInt64 = 1_048_576
+        var samples = appsSamples
+        func system(_ pid: Int32, uid: UInt32, path: String?, _ command: String, cpu: Double, mib size: UInt64) {
+            samples.append(
+                ProcessSample(
+                    identity: ProcessIdentity(pid: pid, startMicros: Int64(pid) * 1_000),
+                    ppid: 1, uid: uid, path: path, command: command, cpuPercent: cpu, footprintBytes: size * mib))
+        }
+        system(0, uid: 0, path: nil, "kernel_task", cpu: 18, mib: 900)
+        system(
+            190, uid: 88,
+            path: "/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer",
+            "WindowServer", cpu: 12, mib: 512)
+        let tools: [(String, String, Double, UInt64)] = [
+            ("/usr/sbin/mDNSResponder", "mDNSResponder", 0.4, 22), ("/usr/libexec/trustd", "trustd", 0.2, 31),
+            ("/usr/sbin/distnoted", "distnoted", 0.1, 9), ("/usr/libexec/syspolicyd", "syspolicyd", 0.1, 48),
+            ("/usr/libexec/rapportd", "rapportd", 0.0, 14), ("/usr/sbin/cfprefsd", "cfprefsd", 0.1, 12),
+            ("/usr/libexec/lsd", "lsd", 0.3, 26), ("/usr/sbin/coreaudiod", "coreaudiod", 0.6, 18),
+            ("/usr/libexec/airportd", "airportd", 0.2, 11), ("/usr/sbin/bluetoothd", "bluetoothd", 0.1, 10),
+            ("/usr/libexec/logd", "logd", 0.5, 40), ("/usr/sbin/notifyd", "notifyd", 0.0, 6),
+            ("/usr/libexec/UserEventAgent", "UserEventAgent", 0.1, 8), ("/usr/bin/sharingd", "sharingd", 0.2, 33),
+            ("/usr/libexec/powerd", "powerd", 0.1, 7), ("/usr/libexec/diskarbitrationd", "diskarbitrationd", 0.0, 5),
+            ("/usr/libexec/containermanagerd", "containermanagerd", 0.1, 19),
+            ("/usr/libexec/secd", "secd", 0.0, 13), ("/usr/bin/pbs", "pbs", 0.0, 8),
+        ]
+        for (index, tool) in tools.enumerated() {
+            system(Int32(400 + index), uid: 0, path: tool.0, tool.1, cpu: tool.2, mib: tool.3)
+        }
+        if !cpuReady {
+            samples = samples.map { sample in
+                var pending = sample
+                pending.cpuPercent = nil
+                return pending
+            }
+        }
+        return ProcessSnapshot(sequence: 1, processes: samples, cpuReady: cpuReady, otherUsers: .available)
+    }
+
     /// The sidebar's width in the window (UI-SPEC Shell: ideal 220 pt), taken off the content width
     /// to get the detail column the section fixtures render in.
     private static let sidebarWidth: CGFloat = 220
@@ -619,7 +696,10 @@ enum DebugSnapshotRenderer {
                 DebugChartHover.preset = fixture.hoverSecondsAgo.map {
                     HistoryChartTime.date(Date.now.timeIntervalSinceReferenceDate - $0)
                 }
-                let content = detailView(for: fixture.section, store: store)
+                // The table model is built here, with Chrome open, so the fixture shows an outline.
+                let table = ProcessTableModel(persistsState: false)
+                table.expanded = [chromeID]
+                let content = detailView(for: fixture.section, store: store, table: table)
                     .frame(width: size.width, height: size.height)
                     .background(Color(nsColor: .windowBackgroundColor))
                     .environment(\.colorScheme, scheme)
@@ -656,8 +736,11 @@ enum DebugSnapshotRenderer {
 
     /// The detail column of a section, as `WindowRootView` shows it.
     @ViewBuilder
-    private static func detailView(for section: WindowSection, store: MetricsStore) -> some View {
+    private static func detailView(
+        for section: WindowSection, store: MetricsStore, table: ProcessTableModel
+    ) -> some View {
         switch section {
+        case .processes: ProcessesSectionView(store: store, model: table)
         case .cpu: CPUSectionView(store: store)
         case .gpu: GPUSectionView(store: store)
         case .memory: MemorySectionView(store: store)

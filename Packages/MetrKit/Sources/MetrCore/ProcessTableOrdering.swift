@@ -110,11 +110,15 @@ public enum ProcessTableOrdering {
     /// rows that exited drop out, no new row enters (D-16). Otherwise every id in `order` under the
     /// effective column. A freeze whose rows have all exited falls through to a fresh order. While
     /// the effective column stands in for CPU, the direction is that column's default.
+    ///
+    /// `sortChanged` is true on the build right after the user chose another column or direction:
+    /// a header click is an explicit action, so it ignores the freeze, re-sorts at once and may admit
+    /// rows the freeze was holding back (UI-SPEC "Rows do not jump"; Phase 2 D-06).
     public static func next(
         _ items: [ProcessTableItem], column: ProcessTableColumn, ascending: Bool, cpuReady: Bool,
         previous: [String], frozen: Bool, sortChanged: Bool = false
     ) -> [String] {
-        if frozen, !previous.isEmpty {
+        if frozen, !sortChanged, !previous.isEmpty {
             let present = Set(items.map(\.id))
             let kept = previous.filter { present.contains($0) }
             if !kept.isEmpty { return kept }

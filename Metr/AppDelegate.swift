@@ -56,7 +56,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// DEBUG only: drives the window from METR_DEBUG_WINDOW_SCRIPT, `step@seconds` pairs separated
-    /// by `;`. A step is a section name, `last`, `miniaturize`, `deminiaturize` or `close`. Release has no script and no environment name.
+    /// by `;`. A step is a section name, `last`, `miniaturize`, `deminiaturize`, `close`,
+    /// `sort:<column>:<asc|desc>` (the Processes table sorts as if its header had been clicked) or
+    /// `expand:<groupID>` (opens a Processes group). Release has no script and no environment name.
     private func runWindowScriptIfRequested() {
         #if DEBUG
         for (step, seconds) in DebugHooks.windowScript {
@@ -71,6 +73,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.windowController?.miniaturizeForScript()
                     } else if step == "deminiaturize" {
                         self.windowController?.deminiaturizeForScript()
+                    } else if step.hasPrefix("sort:") {
+                        self.scriptSort(String(step.dropFirst("sort:".count)))
+                    } else if step.hasPrefix("expand:") {
+                        self.windowModel.processTable?.expanded.insert(String(step.dropFirst("expand:".count)))
                     } else if let section = WindowSection(rawValue: step) {
                         self.showWindow(.section(section))
                     } else {
@@ -81,6 +87,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #endif
     }
+
+    #if DEBUG
+    /// `<column>:<asc|desc>` from a window script `sort:` step.
+    private func scriptSort(_ spec: String) {
+        let parts = spec.split(separator: ":")
+        guard parts.count == 2, let column = ProcessTableColumn(rawValue: String(parts[0])),
+            parts[1] == "asc" || parts[1] == "desc"
+        else {
+            DebugHooks.log("window script bad sort step")
+            return
+        }
+        windowModel.processTable?.setSort(column, ascending: parts[1] == "asc")
+    }
+    #endif
 
     /// The only place the welcome window is ever presented (D-15): the gate admits one claim per
     /// preferences domain, and the flag is written at claim time so a crash cannot repeat it.
