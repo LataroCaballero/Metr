@@ -25,6 +25,11 @@ struct ProcessesSectionView: View {
     var body: some View {
         content
             .navigationSubtitle(partialNotice)
+            // The system's toolbar search field, on this section only (D-13). Cmd-F focuses it and the
+            // system field scrolls long text; there are no scopes and no suggestions.
+            .searchable(text: Bindable(model).searchText, placement: .toolbar, prompt: "Search processes")
+            // Esc steps back: the focused field clears its own text first, then the selection ends.
+            .onExitCommand { model.clearSelection() }
     }
 
     /// "System processes not shown." while the other-users half is failing; the user's own
@@ -58,17 +63,37 @@ struct ProcessesSectionView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    @ViewBuilder
     private func table(for snapshot: ProcessSnapshot) -> some View {
         let rows = model.rows(for: snapshot)
+        if rows.isEmpty && model.hasQuery {
+            // Nothing matches: the system's "No Results" view fills the table area (D-13).
+            ContentUnavailableView.search(text: model.searchText)
+                .onChange(of: model.searchText) { prune() }
+        } else {
+            outline(rows: rows, for: snapshot)
+        }
+    }
+
+    private func prune() {
+        model.prune()
+        model.applyPendingFocus()
+    }
+
+    private func outline(rows: [ProcessTableRow], for snapshot: ProcessSnapshot) -> some View {
         let active = ProcessTableOrdering.effectiveColumn(model.column, cpuReady: snapshot.cpuReady)
         let ascending = active == model.column ? model.ascending : ProcessTableOrdering.defaultAscending(active)
         return ProcessOutlineView(
             model: model, rows: rows, active: active, activeAscending: ascending, text: text)
+        .background { frameReader }
         .onAppear { model.applyPendingFocus() }
+        // A new reading, or a new search, ends what no longer exists and applies a waiting deep link;
+        // the watchdog releases a hover whose end was never delivered.
         .onChange(of: snapshot.sequence) {
-            model.prune()
-            model.applyPendingFocus()
+            prune()
+            model.runFreezeWatchdog()
         }
+        .onChange(of: model.searchText) { prune() }
         #if DEBUG
         .task(id: rows.isEmpty) {
             guard !rows.isEmpty else { return }
@@ -76,6 +101,14 @@ struct ProcessesSectionView: View {
             OutlineProbe.log(model: model)
         }
         #endif
+    }
+}
+
+extension ProcessesSectionView {
+    /// Reports the table's frame in screen coordinates, for the freeze watchdog. The fixtures render the
+    /// table through `cacheDisplay`, where an empty AppKit view draws nothing, so no DEBUG guard is needed.
+    fileprivate var frameReader: some View {
+        ScreenFrameReader { model.tableScreenFrame = $0 }
     }
 }
 

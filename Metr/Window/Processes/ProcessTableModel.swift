@@ -30,6 +30,15 @@ struct ProcessTableRow: Identifiable, Equatable {
     /// Every helper of a group, in the active order. Empty for a helper and a standalone process.
     let children: [ProcessTableRow]
 
+    /// The same row with other children: a search that matched only some helpers shows just those.
+    func replacingChildren(_ children: [ProcessTableRow]) -> ProcessTableRow {
+        ProcessTableRow(
+            id: id, name: name, help: help, icon: icon, kind: kind, pid: pid, isHelper: isHelper,
+            isOwn: isOwn, cpuPercent: cpuPercent, footprintBytes: footprintBytes,
+            diskReadPerSec: diskReadPerSec, diskWritePerSec: diskWritePerSec, helperCount: helperCount,
+            children: children)
+    }
+
     /// The comparable values the column headers sort by. The table never sorts its data with them:
     /// the model orders the rows (`ProcessTableOrdering`); they exist for the header indicator.
     var sortName: String { name }
@@ -67,8 +76,27 @@ final class ProcessTableModel {
     /// and a value changed during a view update would be a state change inside `body`.
     @ObservationIgnored private(set) var effectiveColumn: ProcessTableColumn
 
-    /// Whether the order is held still. 03-13 sets it from the pointer and the selection (D-16).
-    @ObservationIgnored var isFrozen = false
+    /// The text of the toolbar search field (D-13). Never persisted: it dies with the window.
+    var searchText = ""
+
+    /// True while the pointer is over the table: the order holds still so the next click lands on
+    /// the row the user aimed at (D-16, T-03-27). Observed, because a change must re-evaluate the rows.
+    private(set) var isPointerInTable = false
+
+    /// The table's frame in screen coordinates, reported by the view. The watchdog compares the
+    /// pointer with it, because a hover end can be missed (the panel's rule, Phase 2 D-10).
+    @ObservationIgnored var tableScreenFrame: CGRect?
+
+    /// Whether the order is held still (D-16): the pointer is over the table or a row is selected.
+    /// A selected row never moves, so a toolbar action can never act on a row that slid away.
+    var isFrozen: Bool { isPointerInTable || !selection.isEmpty }
+
+    /// Groups the current search opened because only some of their helpers matched. Derived from the
+    /// query and the reading on every build, never the user's own expansion (D-13).
+    @ObservationIgnored private(set) var searchExpanded: Set<String> = []
+
+    /// A query is active: an empty result then means "no match", not "no processes".
+    var hasQuery: Bool { ProcessSearch.normalize(searchText) != nil }
 
     /// The group the outline should scroll into view on its next update. Written by `focus`, read and
     /// cleared by the host while it applies a refresh, so it is not observed.
@@ -83,7 +111,11 @@ final class ProcessTableModel {
     @ObservationIgnored private var previousGroups: [String] = []
     @ObservationIgnored private var previousChildren: [String: [String]] = [:]
     @ObservationIgnored private var memo: (key: MemoKey, rows: [ProcessTableRow])?
+    /// The ids of every row of the newest build, after the search and the freeze: what can be selected.
     @ObservationIgnored private var liveIDs: Set<String> = []
+    /// The ids of every group in the newest reading, whatever the search hides: what can stay expanded
+    /// and what a deep link can find.
+    @ObservationIgnored private var readingGroupIDs: Set<String> = []
     @ObservationIgnored private var loggedKey: String?
     /// The sort the rows were last built with, so the first build after a header click knows it must
     /// ignore the freeze.
@@ -100,6 +132,7 @@ final class ProcessTableModel {
         var ascending: Bool
         var frozen: Bool
         var expanded: Set<String>
+        var query: String?
     }
 
     init(persistsState: Bool) {
@@ -132,19 +165,21 @@ final class ProcessTableModel {
     }
 
     /// The "and N more…" deep link (D-01, D-02): opens one group, selects it and asks the outline to
-    /// scroll it into view. When the group is not in a reading yet the focus waits for it, for up to
-    /// three seconds, and then disappears without an error (T-03-28).
+    /// scroll it into view. A search in the way is cleared so the group can be seen. When the group is
+    /// not in a reading yet the focus waits for it, for up to three seconds, and then disappears
+    /// without an error (T-03-28).
     func focus(groupID: String) {
         pendingFocus = (groupID, Date().addingTimeInterval(Self.pendingFocusLifetime))
         applyPendingFocus()
     }
 
-    /// Applies a waiting focus once its group is in the rows. Called when the table appears and on
+    /// Applies a waiting focus once its group is in a reading. Called when the table appears and on
     /// every new reading, outside the view update.
     func applyPendingFocus() {
         guard let pending = pendingFocus else { return }
-        if liveIDs.contains(pending.id) {
+        if readingGroupIDs.contains(pending.id) {
             pendingFocus = nil
+            if !searchText.isEmpty { searchText = "" }
             expanded.insert(pending.id)
             selection = [pending.id]
             scrollTarget = pending.id
@@ -153,23 +188,60 @@ final class ProcessTableModel {
         }
     }
 
-    /// Forgets expansion and selection of rows that are gone. Called once per new reading, outside
-    /// the view update.
+    /// Whether a group is open in the outline: the user opened it, or the search did.
+    func isOpen(_ id: String) -> Bool { expanded.contains(id) || searchExpanded.contains(id) }
+
+    /// The user opened or closed a group with the disclosure triangle or the keyboard. Closing one
+    /// the search had opened closes it for the rest of that search too.
+    func userSetExpanded(_ id: String, open: Bool) {
+        if open {
+            expanded.insert(id)
+        } else {
+            expanded.remove(id)
+            searchExpanded.remove(id)
+        }
+    }
+
+    /// Esc, a click on empty space or an exited process ends the selection, and with it the freeze.
+    func clearSelection() {
+        if !selection.isEmpty { selection = [] }
+    }
+
+    /// The host reports the pointer entering or leaving the table.
+    func setPointerInTable(_ inside: Bool) {
+        if isPointerInTable != inside { isPointerInTable = inside }
+    }
+
+    /// Releases a hold that outlived its pointer: when the pointer is outside the table's frame the
+    /// hover end was missed. A pointer resting inside the frame never releases it (D-16). Called after
+    /// each process reading, so a stuck freeze lasts one tick at most.
+    func runFreezeWatchdog() {
+        #if DEBUG
+        if scriptedPointer { return }
+        #endif
+        guard isPointerInTable, let frame = tableScreenFrame else { return }
+        if !frame.contains(NSEvent.mouseLocation) { isPointerInTable = false }
+    }
+
+    /// Forgets expansion of groups that are gone and selection of rows that are gone or that a search
+    /// hid. Called once per new reading and when the search changes, outside the view update.
     func prune() {
-        guard !liveIDs.isEmpty else { return }
-        let openAndLive = expanded.intersection(liveIDs)
+        guard !readingGroupIDs.isEmpty else { return }
+        let openAndLive = expanded.intersection(readingGroupIDs)
         if openAndLive != expanded { expanded = openAndLive }
-        let selectedAndLive = selection.intersection(liveIDs)
-        if selectedAndLive != selection { selection = selectedAndLive }
+        let selectedAndShown = selection.intersection(liveIDs)
+        if selectedAndShown != selection { selection = selectedAndShown }
     }
 
     /// The root rows for one reading. Grouping runs once per sequence; ordering and row building
     /// are memoized by (sequence, column, direction, freeze, expansion), so a re-render with
     /// nothing changed costs none.
     func rows(for snapshot: ProcessSnapshot) -> [ProcessTableRow] {
+        let query = ProcessSearch.normalize(searchText)
+        let frozen = isFrozen
         let key = MemoKey(
-            sequence: snapshot.sequence, column: column, ascending: ascending, frozen: isFrozen,
-            expanded: expanded)
+            sequence: snapshot.sequence, column: column, ascending: ascending, frozen: frozen,
+            expanded: expanded, query: query)
         if let memo, memo.key == key { return memo.rows }
 
         let effective = ProcessTableOrdering.effectiveColumn(column, cpuReady: snapshot.cpuReady)
@@ -182,12 +254,10 @@ final class ProcessTableModel {
         var rowsByID: [String: ProcessTableRow] = [:]
         var items: [ProcessTableItem] = []
         var newChildren: [String: [String]] = [:]
-        var ids: Set<String> = []
-        var helperTotal = 0
         for group in live {
             let row = row(
-                for: group, snapshot: snapshot, selfPID: pid, selfUID: me, sortChanged: sortChanged,
-                children: &newChildren)
+                for: group, snapshot: snapshot, selfPID: pid, selfUID: me, frozen: frozen,
+                sortChanged: sortChanged, children: &newChildren)
             guard rowsByID[group.id] == nil else { continue }
             rowsByID[group.id] = row
             items.append(
@@ -195,23 +265,56 @@ final class ProcessTableModel {
                     id: row.id, name: row.name, cpuPercent: row.cpuPercent,
                     footprintBytes: row.footprintBytes, diskReadPerSec: row.diskReadPerSec,
                     diskWritePerSec: row.diskWritePerSec))
-            ids.insert(row.id)
-            for child in row.children { ids.insert(child.id) }
-            helperTotal += row.children.count
         }
+        // Ordered and frozen over every group; the search only filters afterwards, so a query never
+        // reorders anything and the order the freeze holds is the order the user was looking at.
         let order = ProcessTableOrdering.next(
             items, column: column, ascending: ascending, cpuReady: snapshot.cpuReady,
-            previous: previousGroups, frozen: isFrozen, sortChanged: sortChanged)
-        let rows = order.compactMap { rowsByID[$0] }
+            previous: previousGroups, frozen: frozen, sortChanged: sortChanged)
+
+        var rows: [ProcessTableRow] = []
+        var opened: Set<String> = []
+        if let query {
+            for id in order {
+                guard let row = rowsByID[id] else { continue }
+                let fields = ProcessSearchFields(
+                    groupID: id, name: row.name, pid: row.pid,
+                    helpers: row.children.map { ProcessSearchHelper(id: $0.id, name: $0.name, pid: $0.pid) })
+                guard let match = ProcessSearch.match(query, fields) else { continue }
+                if match.groupMatches {
+                    // A group that matches by name stays as the user left it, all helpers included.
+                    rows.append(row)
+                } else {
+                    // Only helpers matched: the group opens by itself, showing just those.
+                    opened.insert(id)
+                    rows.append(row.replacingChildren(row.children.filter { match.helperIDs.contains($0.id) }))
+                }
+            }
+        } else {
+            rows = order.compactMap { rowsByID[$0] }
+        }
+
+        var shown: Set<String> = []
+        var helperTotal = 0
+        for row in rows {
+            shown.insert(row.id)
+            for child in row.children { shown.insert(child.id) }
+            helperTotal += row.children.count
+        }
 
         previousGroups = order
         previousChildren = newChildren
-        liveIDs = ids
+        readingGroupIDs = Set(rowsByID.keys)
+        liveIDs = shown
+        searchExpanded = opened
         memo = (key, rows)
         // The header indicator and the emphasis follow the effective column. It changes at most once
         // (the first CPU reading), and never while the view reads it for the first time in a body.
         if effectiveColumn != effective { effectiveColumn = effective }
         logTable(sequence: snapshot.sequence, rows: rows, helpers: helperTotal, effective: effective, ready: snapshot.cpuReady)
+        logSearchAndFreeze(
+            sequence: snapshot.sequence, query: query, rows: rows, helpers: helperTotal, order: order,
+            frozen: frozen, sortChanged: sortChanged)
         return rows
     }
 
@@ -225,7 +328,7 @@ final class ProcessTableModel {
 
     private func row(
         for group: ProcessGroup, snapshot: ProcessSnapshot, selfPID: Int32, selfUID: UInt32,
-        sortChanged: Bool, children newChildren: inout [String: [String]]
+        frozen: Bool, sortChanged: Bool, children newChildren: inout [String: [String]]
     ) -> ProcessTableRow {
         let appName = group.appPath.map(naming.appDisplayName(atPath:))
         let name = appName ?? naming.standaloneName(of: group)
@@ -245,7 +348,7 @@ final class ProcessTableModel {
         }
         let order = ProcessTableOrdering.next(
             items, column: column, ascending: ascending, cpuReady: snapshot.cpuReady,
-            previous: previousChildren[group.id] ?? [], frozen: isFrozen, sortChanged: sortChanged)
+            previous: previousChildren[group.id] ?? [], frozen: frozen, sortChanged: sortChanged)
         newChildren[group.id] = order
 
         let representative = group.main ?? group.helpers.min { $0.identity.pid < $1.identity.pid }
@@ -308,7 +411,60 @@ final class ProcessTableModel {
         #endif
     }
 
+    /// `table search=<chars> groups=<n> helpers=<n>` when the filtered result changes, and
+    /// `table frozen=<0|1> moved=<n>` once per reading and per change of the freeze. `moved` counts
+    /// rows whose order against the others changed since the freeze began; it must be 0 while frozen.
+    /// Numbers only, never a name.
+    private func logSearchAndFreeze(
+        sequence: UInt64, query: String?, rows: [ProcessTableRow], helpers: Int, order: [String],
+        frozen: Bool, sortChanged: Bool
+    ) {
+        #if DEBUG
+        if let query {
+            let key = "\(query)/\(rows.map(\.id))/\(helpers)"
+            if loggedSearchKey != key {
+                loggedSearchKey = key
+                DebugHooks.log("table search=\(query.count) groups=\(rows.count) helpers=\(helpers)")
+            }
+        } else {
+            loggedSearchKey = nil
+        }
+
+        var moved = 0
+        if frozen {
+            if freezeBaseline == nil || sortChanged {
+                freezeBaseline = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
+            } else if let baseline = freezeBaseline {
+                var last = -1
+                for id in order {
+                    guard let index = baseline[id] else { continue }
+                    if index < last { moved += 1 } else { last = index }
+                }
+            }
+        } else {
+            freezeBaseline = nil
+        }
+        let freezeKey = "\(sequence)/\(frozen)"
+        guard loggedFreezeKey != freezeKey else { return }
+        loggedFreezeKey = freezeKey
+        DebugHooks.log("table frozen=\(frozen ? 1 : 0) moved=\(moved)")
+        #endif
+    }
+
     #if DEBUG
+    @ObservationIgnored private var loggedSearchKey: String?
+    @ObservationIgnored private var loggedFreezeKey: String?
+    /// The order the table held when the current freeze began, by id.
+    @ObservationIgnored private var freezeBaseline: [String: Int]?
+    /// A scripted `hover:` step stands in for the pointer, so the watchdog leaves it alone.
+    @ObservationIgnored private var scriptedPointer = false
+
+    /// The window script's `hover:<0|1>` step.
+    func scriptPointer(_ inside: Bool) {
+        scriptedPointer = inside
+        setPointerInTable(inside)
+    }
+
     /// The rows of the newest reading, for the DEBUG outline probe. Empty before the first read.
     var debugRows: [ProcessTableRow] { memo?.rows ?? [] }
     #endif

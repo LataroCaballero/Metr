@@ -134,9 +134,9 @@ struct TopAppsSection: View {
     }
 }
 
-/// Reports its own frame in screen coordinates, so the freeze watchdog can tell whether the
+/// Reports its own frame in screen coordinates (shared by the panel and the window's process table), so the freeze watchdog can tell whether the
 /// pointer is still over the list when the hover end was never delivered (RESEARCH Pitfall 10, A8).
-private struct ScreenFrameReader: NSViewRepresentable {
+struct ScreenFrameReader: NSViewRepresentable {
     let onChange: (CGRect?) -> Void
 
     func makeNSView(context: Context) -> ReaderView {

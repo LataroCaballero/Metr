@@ -31,7 +31,8 @@ struct ProcessOutlineView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let coordinator = context.coordinator
-        let outline = NSOutlineView()
+        let outline = ProcessOutline()
+        outline.onCancel = { [weak model] in model?.clearSelection() }
         outline.style = .inset
         outline.usesAlternatingRowBackgroundColors = true
         outline.allowsMultipleSelection = false
@@ -62,7 +63,8 @@ struct ProcessOutlineView: NSViewRepresentable {
         outline.delegate = coordinator
         coordinator.outline = outline
 
-        let scrollView = NSScrollView()
+        let scrollView = TableScrollView()
+        scrollView.onPointer = { [weak model] inside in model?.setPointerInTable(inside) }
         scrollView.documentView = outline
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
@@ -132,6 +134,7 @@ struct ProcessOutlineView: NSViewRepresentable {
         private var nodes: [String: Node] = [:]
         private var structure: [Structure] = []
         private var lastActive: ProcessTableColumn?
+        private var lastAscending: Bool?
         /// True while this host changes the outline itself, so its own callbacks are not mistaken
         /// for the user's and never write to the model during a view update.
         private var isApplying = false
@@ -184,40 +187,45 @@ struct ProcessOutlineView: NSViewRepresentable {
                 outline.sortDescriptors = [NSSortDescriptor(key: active.rawValue, ascending: ascending)]
             }
 
+            let oldStructure = structure
             let reordered = newStructure != structure
             structure = newStructure
             let activeChanged = lastActive != active
+            let directionChanged = lastAscending != nil && lastAscending != ascending
             lastActive = active
+            lastAscending = ascending
             let clip = scrollView.contentView
             if reordered {
-                // Rows came, went or moved: reload once, then put expansion, selection and the
-                // scroll offset back so the user's place never changes.
-                let origin = clip.bounds.origin
-                outline.reloadData()
-                reconcileExpansion(in: outline)
-                let target = clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin
-                clip.scroll(to: target)
-                scrollView.reflectScrolledClipView(clip)
+                // Rows came, went or moved. The numbers of the rows on screen are refreshed first, then
+                // the change animates as removals, moves and insertions keyed by identity (0.35 s, none
+                // under Reduce Motion). A new sort, a first build or a big upheaval reloads at once.
+                let animated =
+                    !activeChanged && !directionChanged && !oldStructure.isEmpty
+                    && animate(from: oldStructure, to: newStructure, dirty: dirty, in: outline)
+                if animated {
+                    reconcileExpansion(in: outline)
+                } else {
+                    // Reload once, then put expansion, selection and the scroll offset back so the
+                    // user's place never changes.
+                    let origin = clip.bounds.origin
+                    outline.reloadData()
+                    reconcileExpansion(in: outline)
+                    let target = clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin
+                    clip.scroll(to: target)
+                    scrollView.reflectScrolledClipView(clip)
+                }
             } else {
                 reconcileExpansion(in: outline)
-                let visible = outline.rows(in: outline.visibleRect)
-                let columns = IndexSet(integersIn: 0..<outline.numberOfColumns)
                 if activeChanged {
                     // The emphasised column changed (the first CPU reading): redraw what is on screen.
+                    let visible = outline.rows(in: outline.visibleRect)
                     if visible.length > 0 {
                         outline.reloadData(
                             forRowIndexes: IndexSet(integersIn: visible.location..<(visible.location + visible.length)),
-                            columnIndexes: columns)
+                            columnIndexes: IndexSet(integersIn: 0..<outline.numberOfColumns))
                     }
                 } else {
-                    var indexes = IndexSet()
-                    for node in dirty {
-                        let index = outline.row(forItem: node)
-                        if index >= visible.location, index < visible.location + visible.length {
-                            indexes.insert(index)
-                        }
-                    }
-                    if !indexes.isEmpty { outline.reloadData(forRowIndexes: indexes, columnIndexes: columns) }
+                    redrawVisible(dirty, in: outline)
                 }
             }
             reconcileSelection(in: outline)
@@ -299,9 +307,109 @@ struct ProcessOutlineView: NSViewRepresentable {
         }
         #endif
 
+        /// Redraws the rows on screen whose numbers changed, without touching the others.
+        private func redrawVisible(_ dirty: [Node], in outline: NSOutlineView) {
+            let visible = outline.rows(in: outline.visibleRect)
+            var indexes = IndexSet()
+            for node in dirty {
+                let index = outline.row(forItem: node)
+                if index >= visible.location, index < visible.location + visible.length { indexes.insert(index) }
+            }
+            if !indexes.isEmpty {
+                outline.reloadData(forRowIndexes: indexes, columnIndexes: IndexSet(integersIn: 0..<outline.numberOfColumns))
+            }
+        }
+
+        /// The animated update: the outline's own remove, move and insert, in one batch with a 0.35 s
+        /// smooth timing, so a row keeps its identity (selection, expansion, scroll) while it moves.
+        /// Returns false, having changed nothing, when the change is not worth animating: Reduce Motion,
+        /// or more than `maximumAnimatedOperations` rows involved (a search, a big re-rank).
+        private func animate(from old: [Structure], to new: [Structure], dirty: [Node], in outline: NSOutlineView) -> Bool {
+            guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return false }
+            // A second change while the first is still moving (a freeze released right at a reading)
+            // reloads instead of stacking batches on a table that is mid-animation.
+            guard ProcessInfo.processInfo.systemUptime >= animationEnd else { return false }
+            let rootDiff = RowDiff.between(old: old.map(\.id), new: new.map(\.id))
+
+            // Roots in both lists whose helpers changed: an open group animates its helpers too; a
+            // closed one, or one that gained or lost its triangle, just reloads that item.
+            let oldChildren = Dictionary(old.map { ($0.id, $0.children) }, uniquingKeysWith: { first, _ in first })
+            var childDiffs: [(parent: Node, diff: RowDiff)] = []
+            var reloaded: [Node] = []
+            for entry in new {
+                guard let before = oldChildren[entry.id], before != entry.children, let node = nodes[entry.id] else { continue }
+                if before.isEmpty || entry.children.isEmpty || !outline.isItemExpanded(node) {
+                    reloaded.append(node)
+                } else {
+                    childDiffs.append((node, RowDiff.between(old: before, new: entry.children)))
+                }
+            }
+            let total = rootDiff.operationCount + childDiffs.reduce(0) { $0 + $1.diff.operationCount } + reloaded.count
+            guard total <= Self.maximumAnimatedOperations else { return false }
+
+            // Numbers first, at the rows' current places, so a moving row already shows fresh values.
+            redrawVisible(dirty, in: outline)
+
+            func run(_ diff: RowDiff, parent: Node?) {
+                if !diff.removed.isEmpty {
+                    outline.removeItems(at: diff.removed, inParent: parent, withAnimation: .effectFade)
+                }
+                for move in diff.moves {
+                    outline.moveItem(at: move.from, inParent: parent, to: move.to, inParent: parent)
+                }
+                if !diff.inserted.isEmpty {
+                    outline.insertItems(at: diff.inserted, inParent: parent, withAnimation: .effectFade)
+                }
+            }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Self.animationDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                context.allowsImplicitAnimation = true
+                outline.beginUpdates()
+                run(rootDiff, parent: nil)
+                for (parent, diff) in childDiffs { run(diff, parent: parent) }
+                outline.endUpdates()
+            }
+            animationEnd = ProcessInfo.processInfo.systemUptime + Self.animationDuration + 0.1
+            for node in reloaded { outline.reloadItem(node, reloadChildren: true) }
+            #if DEBUG
+            logAnimation(rootDiff: rootDiff, helperOperations: childDiffs.reduce(0) { $0 + $1.diff.operationCount })
+            #endif
+            return true
+        }
+
+        /// When the last animated batch is done moving (`systemUptime`).
+        private var animationEnd: TimeInterval = 0
+        private static let animationDuration: TimeInterval = 0.35
+        private static let maximumAnimatedOperations = 60
+
+        #if DEBUG
+        /// `table animate moves=<n> inserts=<n> removes=<n> helpers=<n>` for each animated update, and
+        /// `table animate consistent=<0|1>` once it has settled: the outline's root order is the
+        /// model's. A mismatch would mean the animated path drifted from the rows it was given.
+        private func logAnimation(rootDiff: RowDiff, helperOperations: Int) {
+            DebugHooks.log(
+                "table animate moves=\(rootDiff.moves.count) inserts=\(rootDiff.inserted.count)"
+                    + " removes=\(rootDiff.removed.count) helpers=\(helperOperations)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.animationDuration + 0.25) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, let outline = self.outline else { return }
+                    let expected = self.roots.map(\.id)
+                    var actual: [String] = []
+                    for index in 0..<outline.numberOfRows {
+                        if let node = outline.item(atRow: index) as? Node, outline.level(forItem: node) == 0 {
+                            actual.append(node.id)
+                        }
+                    }
+                    DebugHooks.log("table animate consistent=\(actual == expected ? 1 : 0)")
+                }
+            }
+        }
+        #endif
+
         private func reconcileExpansion(in outline: NSOutlineView) {
             for node in roots where !node.children.isEmpty {
-                let open = model.expanded.contains(node.id)
+                let open = model.isOpen(node.id)
                 guard open != outline.isItemExpanded(node) else { continue }
                 if open { outline.expandItem(node) } else { outline.collapseItem(node) }
             }
@@ -386,12 +494,12 @@ struct ProcessOutlineView: NSViewRepresentable {
 
         func outlineViewItemDidExpand(_ notification: Notification) {
             guard !isApplying, let node = notification.userInfo?["NSObject"] as? Node else { return }
-            model.expanded.insert(node.id)
+            model.userSetExpanded(node.id, open: true)
         }
 
         func outlineViewItemDidCollapse(_ notification: Notification) {
             guard !isApplying, let node = notification.userInfo?["NSObject"] as? Node else { return }
-            model.expanded.remove(node.id)
+            model.userSetExpanded(node.id, open: false)
         }
 
         func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -408,6 +516,50 @@ struct ProcessOutlineView: NSViewRepresentable {
             else { return }
             model.setSort(column, ascending: first.ascending)
         }
+    }
+}
+
+// MARK: Host views
+
+/// The outline, with Esc: it steps back one level by clearing the selection, which also ends the
+/// freeze (UI-SPEC Keyboard). A focused search field clears its own text first, natively.
+private final class ProcessOutline: NSOutlineView {
+    var onCancel: (() -> Void)?
+
+    override func cancelOperation(_ sender: Any?) {
+        onCancel?()
+    }
+}
+
+/// The scroll view, reporting the pointer entering and leaving the table so the order can hold
+/// still under it (D-16). An AppKit tracking area over the visible rect: reliable for an AppKit
+/// host, where a SwiftUI hover would depend on the hosting view's own tracking.
+private final class TableScrollView: NSScrollView {
+    var onPointer: ((Bool) -> Void)?
+    private var tracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self,
+            userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onPointer?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onPointer?(false)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // A table that leaves the window (the section changed, the window closed) is no longer hovered.
+        if window == nil { onPointer?(false) }
     }
 }
 

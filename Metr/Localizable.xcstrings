@@ -901,6 +901,18 @@
         }
       }
     },
+    "Search processes": {
+      "comment": "Prompt of the search field in the window toolbar on the Processes section",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buscar procesos"
+          }
+        }
+      }
+    },
     "Show all in the Metr window": {
       "comment": "Tooltip of the 'and N more…' link in the panel: it opens the Metr window on that app's processes",
       "extractionState": "manual",

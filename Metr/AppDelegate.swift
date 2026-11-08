@@ -59,7 +59,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// by `;`. A step is a section name, `last`, `miniaturize`, `deminiaturize`, `close`,
     /// `sort:<column>:<asc|desc>` (the Processes table sorts as if its header had been clicked) or
     /// `expand:<groupID>` (opens a Processes group) or `processes:<groupID>` (the panel's "and N more…"
-    /// link: opens the window on Processes with that group in view). Release has no script and no environment name.
+    /// link: opens the window on Processes with that group in view), `search:<text>` (types into the
+    /// Processes search), `select:<groupID>`, `deselect` and `hover:<0|1>` (the pointer over the
+    /// table). Release has no script and no environment name.
     private func runWindowScriptIfRequested() {
         #if DEBUG
         for (step, seconds) in DebugHooks.windowScript {
@@ -78,6 +80,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.scriptSort(String(step.dropFirst("sort:".count)))
                     } else if step.hasPrefix("expand:") {
                         self.windowModel.processTable?.expanded.insert(String(step.dropFirst("expand:".count)))
+                    } else if step.hasPrefix("search:") {
+                        self.windowModel.processTable?.searchText = String(step.dropFirst("search:".count))
+                    } else if step.hasPrefix("select:") {
+                        self.windowModel.processTable?.selection = [String(step.dropFirst("select:".count))]
+                    } else if step == "deselect" {
+                        self.windowModel.processTable?.clearSelection()
+                    } else if step.hasPrefix("hover:") {
+                        self.windowModel.processTable?.scriptPointer(step == "hover:1")
                     } else if step.hasPrefix("processes:") {
                         self.showWindow(.processes(focusGroup: String(step.dropFirst("processes:".count))))
                     } else if let section = WindowSection(rawValue: step) {

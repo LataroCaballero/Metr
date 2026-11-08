@@ -121,7 +121,7 @@ struct WindowRootView: View {
         case .processes:
             #if DEBUG
             if DebugHooks.chromeProbeEnabled {
-                ChromeProbeView()
+                processes.modifier(ChromeProbeMenu())
             } else {
                 processes
             }
@@ -163,23 +163,20 @@ private struct SidebarRow: View {
 }
 
 #if DEBUG
-/// DEBUG only: the toolbar search field and toolbar menu that Processes will carry (03-12), so the
-/// chrome probe can check that the AppKit host bridges them (RESEARCH Open Question 2).
-private struct ChromeProbeView: View {
-    @State private var query = ""
-
-    var body: some View {
-        Color.clear
-            .searchable(text: $query, placement: .toolbar)
-            .toolbar {
-                ToolbarItem {
-                    Menu {
-                        Button("Close") {}
-                    } label: {
-                        Image(systemName: "xmark.circle")
-                    }
+/// DEBUG only: the toolbar menu that Processes will carry (03-14), attached to the real Processes
+/// view, so the chrome probe can check that the AppKit host bridges it next to the real search field
+/// (RESEARCH Open Question 2). The temporary search field of 03-01 is gone: the section has its own.
+private struct ChromeProbeMenu: ViewModifier {
+    func body(content: Content) -> some View {
+        content.toolbar {
+            ToolbarItem {
+                Menu {
+                    Button("Close") {}
+                } label: {
+                    Image(systemName: "xmark.circle")
                 }
             }
+        }
     }
 }
 #endif
