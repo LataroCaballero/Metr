@@ -32,6 +32,7 @@ enum DebugSnapshotRenderer {
     private static let chromeID = "/Applications/Google Chrome.app"
     private static let textEditID = "/Applications/TextEdit.app"
     private static let safariID = "/Applications/Safari.app"
+    private static let mailID = "/System/Applications/Mail.app"
 
     private static let totalMemory: UInt64 = 17_179_869_184
 
@@ -361,6 +362,8 @@ enum DebugSnapshotRenderer {
         var hoverSecondsAgo: Double?
         /// What the process list looks like in this fixture.
         var processes: ProcessFixtureState = .none
+        /// Row action states to render in the Processes table, by row id (Quitting, Did not quit).
+        var actionStates: [String: RowActionState] = [:]
     }
 
     private enum ProcessFixtureState {
@@ -474,6 +477,14 @@ enum DebugSnapshotRenderer {
             WindowFixture(
                 name: "processes-min", section: .processes, populated: false,
                 contentSize: NSSize(width: 900, height: 520), processes: .live),
+            // Safari is closing: the row at half opacity, "Quitting…" in the CPU cell, a spinner after the name.
+            WindowFixture(
+                name: "processes-quitting", section: .processes, populated: false, contentSize: standard,
+                processes: .live, actionStates: [safariID: .quitting(startedAt: 0)]),
+            // Mail did not quit: full opacity and a quiet Force Quit… at the end of the Name cell.
+            WindowFixture(
+                name: "processes-didnotquit", section: .processes, populated: false, contentSize: standard,
+                processes: .live, actionStates: [mailID: .didNotQuit]),
         ]
     }
 
@@ -741,6 +752,11 @@ enum DebugSnapshotRenderer {
                 // The table model is built here, with Chrome open, so the fixture shows an outline.
                 let table = ProcessTableModel(persistsState: false)
                 table.expanded = [chromeID]
+                // A preset controller answers `.allowed` for every row, so the fixture does not depend on
+                // which synthetic pids exist on this machine.
+                if !fixture.actionStates.isEmpty {
+                    table.actions.preset(actionStates: fixture.actionStates, availability: .allowed)
+                }
                 let content = detailView(for: fixture.section, store: store, table: table)
                     .frame(width: size.width, height: size.height)
                     .background(Color(nsColor: .windowBackgroundColor))

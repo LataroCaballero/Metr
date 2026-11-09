@@ -99,6 +99,9 @@ final class ProcessTableModel {
     /// (RESEARCH Pitfall 8). Every action of the table goes through it and its guard.
     let actions = ProcessActionController()
 
+    /// The window the table lives in, for the Force Quit sheet. Set by the window model, not observed.
+    @ObservationIgnored var windowProvider: () -> NSWindow? = { nil }
+
     /// True while the pointer is over the table: the order holds still so the next click lands on
     /// the row the user aimed at (D-16, T-03-27). Observed, because a change must re-evaluate the rows.
     private(set) var isPointerInTable = false
@@ -276,8 +279,12 @@ final class ProcessTableModel {
         guard let entry = lookup[id] else { return nil }
         let row = entry.row
         var items: [ProcessActionMenu.Item] = []
-        if !row.isHelper {
+        if row.isHelper {
+            // A helper has no graceful quit: its only item is the force quit of that one process (D-16).
+            items.append(.init(kind: .forceQuitProcess, title: String(localized: "Force Quit Process…")))
+        } else {
             items.append(.init(kind: .quit, title: String(localized: "Quit \(row.name)")))
+            items.append(.init(kind: .forceQuit, title: String(localized: "Force Quit \(row.name)…")))
         }
         var reason: String?
         if case .disabled(let why) = row.availability { reason = why.menuText }
@@ -296,7 +303,17 @@ final class ProcessTableModel {
     func perform(_ kind: ProcessActionMenu.Kind, on id: String) {
         switch kind {
         case .quit: actions.quit(id)
+        case .forceQuit, .forceQuitProcess: presentForceQuit(id)
         }
+    }
+
+    /// Opens the Force Quit sheet for a row on the window that hosts the table. The sheet captures the
+    /// row's role as it is now; nothing opens for a row the guard does not allow, and nothing is sent
+    /// until Force Quit is chosen in the sheet (D-15).
+    func presentForceQuit(_ id: String) {
+        guard let entry = lookup[id], entry.row.availability == .allowed, let window = windowProvider() else { return }
+        let text = ForceQuitAlert.text(forName: entry.row.name, helperOf: entry.row.isHelper ? entry.appName : nil)
+        ForceQuitAlert.present(for: id, title: text.title, message: text.message, in: window, controller: actions)
     }
 
     /// The root rows for one reading. Grouping runs once per sequence; ordering and row building
@@ -592,6 +609,30 @@ final class ProcessTableModel {
         return true
     }
 
+    /// The window script's `forcequit-dryrun:<groupID>` step: builds the Force Quit alert for a row and
+    /// logs how its buttons are configured, without presenting it and without touching the controller, so
+    /// the default-button contract is checked with no signalling path at all.
+    func dryRunForceQuitAlert(rowID: String) {
+        guard let entry = lookup[rowID] else {
+            DebugHooks.log("alert unavailable")
+            return
+        }
+        let text = ForceQuitAlert.text(forName: entry.row.name, helperOf: entry.row.isHelper ? entry.appName : nil)
+        let alert = ForceQuitAlert.make(title: text.title, message: text.message)
+        alert.layout()
+        let buttons = alert.buttons
+        guard buttons.count >= 2 else {
+            DebugHooks.log("alert buttons=\(buttons.count)")
+            return
+        }
+        let first = buttons[0].title == String(localized: "Cancel") ? "cancel" : "other"
+        let firstKey = buttons[0].keyEquivalent == "\r" ? "return" : "other"
+        let secondKey = buttons[1].keyEquivalent.isEmpty ? "none" : "other"
+        DebugHooks.log(
+            "alert buttons=\(buttons.count) first=\(first) firstKey=\(firstKey)"
+                + " secondDestructive=\(buttons[1].hasDestructiveAction ? 1 : 0) secondKey=\(secondKey)")
+    }
+
     /// The rows of the newest reading, for the DEBUG outline probe. Empty before the first read.
     var debugRows: [ProcessTableRow] { memo?.rows ?? [] }
     #endif
@@ -602,6 +643,10 @@ final class ProcessTableModel {
 struct ProcessActionMenu: Equatable {
     enum Kind: Equatable {
         case quit
+        /// Opens the confirmation sheet for an app or standalone process; nothing is sent by the item.
+        case forceQuit
+        /// The same for one helper of an app.
+        case forceQuitProcess
     }
 
     struct Item: Equatable {

@@ -973,6 +973,30 @@
         }
       }
     },
+    "%@, %@ percent CPU, %@ memory, %@ read, %@ write": {
+      "comment": "VoiceOver reading of one Processes table row: name, CPU percent, memory size, disk read rate, disk write rate, e.g. Google Chrome, 182 percent CPU, 2.1 GB memory, 12 MB/s read, 3 MB/s write",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@, %2$@ por ciento de CPU, %3$@ de memoria, lectura %4$@, escritura %5$@"
+          }
+        }
+      }
+    },
+    "not available": {
+      "comment": "VoiceOver: the value of a Processes table cell that shows an em dash because macOS gives Metr no reading for it",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "no disponible"
+          }
+        }
+      }
+    },
     "%@, %@ CPU, %@ memory": {
       "comment": "VoiceOver reading of one app or helper row: name, CPU percent, memory size, e.g. Google Chrome, 182% CPU, 2.1 GB memory",
       "extractionState": "manual",

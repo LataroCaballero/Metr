@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import MetrCore
 import Observation
@@ -39,6 +40,10 @@ final class WindowModel {
     /// owner's preferences domain untouched.
     let persistsState: Bool
 
+    /// The one Metr window, set by `WindowController` when it creates it. The Force Quit sheet hangs
+    /// from it. Weak: the controller owns the window.
+    @ObservationIgnored weak var hostWindow: NSWindow?
+
     /// Called after the selected section changed. Not observed; 03-02 uses it to move the demand.
     @ObservationIgnored var onSectionChange: ((WindowSection) -> Void)?
 
@@ -61,6 +66,7 @@ final class WindowModel {
     func setOpen(_ open: Bool) {
         isOpen = open
         processTable = open ? ProcessTableModel(persistsState: persistsState) : nil
+        processTable?.windowProvider = { [weak self] in self?.hostWindow }
     }
 
     /// The section a "last visited" open shows: the stored one, else CPU (D-03). Without

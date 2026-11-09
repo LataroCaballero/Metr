@@ -140,6 +140,7 @@ final class WindowController: NSWindowController, NSWindowDelegate {
         window.title = "Metr"
         window.contentMinSize = Self.minimumContentSize
         window.delegate = self
+        model.hostWindow = window
         var restored = false
         if model.persistsState {
             restored = window.setFrameUsingName(Self.windowIdentifier)

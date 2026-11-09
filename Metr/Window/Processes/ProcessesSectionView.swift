@@ -48,7 +48,9 @@ struct ProcessesSectionView: View {
             Menu {
                 if let menu, let id = model.selection.first, !menu.items.isEmpty {
                     ForEach(menu.items, id: \.kind) { item in
-                        Button(item.title) { model.perform(item.kind, on: id) }
+                        Button(item.title, role: item.kind == .quit ? nil : .destructive) {
+                            model.perform(item.kind, on: id)
+                        }
                     }
                 } else {
                     // Never an empty menu: the system drops a toolbar menu with nothing in it.

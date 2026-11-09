@@ -62,7 +62,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// link: opens the window on Processes with that group in view), `search:<text>` (types into the
     /// Processes search), `select:<groupID>`, `deselect` and `hover:<0|1>` (the pointer over the
     /// table), and `quit:<pid>` (Quit on the app or standalone row of that pid, through the shared action
-    /// controller; only for a process the run's author spawned). Release has no script and no environment name.
+    /// controller; only for a process the run's author spawned) and `forcequit-dryrun:<groupID>` (logs how the
+    /// Force Quit alert's buttons are configured; the alert is never shown). Release has no script and no environment name.
     private func runWindowScriptIfRequested() {
         #if DEBUG
         for (step, seconds) in DebugHooks.windowScript {
@@ -94,6 +95,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         let pid = Int32(step.dropFirst("quit:".count)) ?? 0
                         let matched = pid > 1 && (self.windowModel.processTable?.scriptQuit(pid: pid) ?? false)
                         DebugHooks.log("window script quit matched=\(matched ? 1 : 0)")
+                    } else if step.hasPrefix("forcequit-dryrun:") {
+                        // Builds the Force Quit alert and logs its buttons; never presents it, never sends anything.
+                        self.windowModel.processTable?.dryRunForceQuitAlert(
+                            rowID: String(step.dropFirst("forcequit-dryrun:".count)))
                     } else if step.hasPrefix("processes:") {
                         self.showWindow(.processes(focusGroup: String(step.dropFirst("processes:".count))))
                     } else if let section = WindowSection(rawValue: step) {

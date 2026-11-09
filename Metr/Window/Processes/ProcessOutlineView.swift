@@ -459,7 +459,7 @@ struct ProcessOutlineView: NSViewRepresentable {
                 let cell =
                     outlineView.makeView(withIdentifier: NameCellView.identifier, owner: nil) as? NameCellView
                     ?? NameCellView()
-                cell.configure(row: row)
+                cell.configure(row: row) { [weak self] in self?.model.presentForceQuit(row.id) }
                 return cell
             case .cpu:
                 return numberCell(
@@ -524,6 +524,87 @@ struct ProcessOutlineView: NSViewRepresentable {
             return menu
         }
 
+        // MARK: VoiceOver (UI-SPEC Keyboard)
+
+        /// One row view per row, which VoiceOver reads as a single element and offers custom actions on.
+        /// Both are computed only when VoiceOver asks, so nothing here costs anything while it is off.
+        func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+            guard let node = item as? Node else { return nil }
+            let view =
+                outlineView.makeView(withIdentifier: ProcessRowView.identifier, owner: nil) as? ProcessRowView
+                ?? ProcessRowView()
+            view.identifier = ProcessRowView.identifier
+            view.node = node
+            view.coordinator = self
+            return view
+        }
+
+        /// "<Name>, <CPU> percent CPU, <memory> memory, <read> read, <write> write", with "not available" for
+        /// an unknown value, "System process" on system rows (or the reason a row offers nothing), and
+        /// "<n> helper processes, collapsed / expanded" on groups.
+        func spokenLabel(for node: Node) -> String {
+            let row = node.row
+            if row.isWorking { return row.name + ", " + String(localized: "Quitting…") }
+            if row.offersForceQuit { return String(localized: "\(row.name) didn't quit. It may be waiting for you.") }
+            let missing = String(localized: "not available")
+            func spoken(_ text: String) -> String { text == "\u{2014}" ? missing : text }
+            let cpu =
+                row.cpuPercent == nil
+                ? missing
+                : text.processCPU(row.cpuPercent).replacingOccurrences(of: "%", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            let memory = spoken(text.processMemory(row.footprintBytes))
+            let read = spoken(text.rate(row.diskReadPerSec))
+            let write = spoken(text.rate(row.diskWritePerSec))
+            var parts = [
+                String(localized: "\(row.name), \(cpu) percent CPU, \(memory) memory, \(read) read, \(write) write")
+            ]
+            if row.helperCount > 0 {
+                parts.append(String(localized: "\(row.helperCount) helper processes"))
+                let open = outline?.isItemExpanded(node) ?? false
+                parts.append(open ? String(localized: "expanded") : String(localized: "collapsed"))
+            }
+            if row.kind == .system { parts.append(String(localized: "System process")) }
+            if case .disabled(let reason) = row.availability, !parts.contains(reason.menuText) {
+                parts.append(reason.menuText)
+            }
+            return parts.joined(separator: ", ")
+        }
+
+        /// Expand or Collapse on a group, and Quit and Force Quit only on a row the guard allows and that
+        /// is not already working. A protected row exposes neither, instead of an action that does nothing
+        /// (PROC-07, T-03-30).
+        func customActions(for node: Node) -> [NSAccessibilityCustomAction] {
+            let row = node.row
+            var list: [NSAccessibilityCustomAction] = []
+            if row.helperCount > 0 || !node.children.isEmpty {
+                let open = outline?.isItemExpanded(node) ?? false
+                let name = open ? String(localized: "Collapse \(row.name)") : String(localized: "Expand \(row.name)")
+                list.append(
+                    NSAccessibilityCustomAction(name: name) { [weak self, weak node] in
+                        guard let self, let node, let outline = self.outline else { return false }
+                        if outline.isItemExpanded(node) { outline.collapseItem(node) } else { outline.expandItem(node) }
+                        return true
+                    })
+            }
+            guard let menu = model.actionMenu(for: row.id), menu.enabled else { return list }
+            for item in menu.items {
+                let name: String
+                switch item.kind {
+                case .quit: name = String(localized: "Quit")
+                case .forceQuit: name = String(localized: "Force Quit…")
+                case .forceQuitProcess: name = String(localized: "Force Quit Process…")
+                }
+                let id = row.id
+                list.append(
+                    NSAccessibilityCustomAction(name: name) { [weak self] in
+                        self?.model.perform(item.kind, on: id)
+                        return true
+                    })
+            }
+            return list
+        }
+
         func outlineViewItemDidExpand(_ notification: Notification) {
             guard !isApplying, let node = notification.userInfo?["NSObject"] as? Node else { return }
             model.userSetExpanded(node.id, open: true)
@@ -572,6 +653,30 @@ private final class ProcessOutline: NSOutlineView {
         if !selectedRowIndexes.contains(row) { selectRowIndexes([row], byExtendingSelection: false) }
         return onMenu?(node.id)
     }
+}
+
+/// A table row that VoiceOver reads as one element, labelled with the whole reading, and that carries the
+/// row's custom actions. Both are answered on demand from the row's current data, so a row that was
+/// refreshed in place is never read stale, and nothing is built while VoiceOver is off.
+private final class ProcessRowView: NSTableRowView {
+    static let identifier = NSUserInterfaceItemIdentifier("process.row")
+
+    weak var node: ProcessOutlineView.Node?
+    weak var coordinator: ProcessOutlineView.Coordinator?
+
+    override func accessibilityLabel() -> String? {
+        guard let node, let coordinator else { return super.accessibilityLabel() }
+        return coordinator.spokenLabel(for: node)
+    }
+
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        guard let node, let coordinator else { return nil }
+        return coordinator.customActions(for: node)
+    }
+
+    /// The cells' texts and the disclosure triangle are folded into the row's own reading; the actions
+    /// above replace the triangle and the Force Quit… button for VoiceOver.
+    override func accessibilityChildren() -> [Any]? { [] }
 }
 
 /// A menu item that runs a closure. It is its own target, so the menu needs no responder chain.
@@ -627,6 +732,60 @@ private final class TableScrollView: NSScrollView {
 
 // MARK: Cells
 
+/// A borderless text button, 11 pt secondary, primary under the pointer (D-15). It is the Force Quit…
+/// offer of a row whose app did not quit; it only opens the confirmation sheet.
+private final class HoverButton: NSButton {
+    private var tracking: NSTrackingArea?
+    private var title_ = ""
+    private var hovered = false
+
+    init() {
+        super.init(frame: .zero)
+        isBordered = false
+        setButtonType(.momentaryChange)
+        focusRingType = .default
+        lineBreakMode = .byClipping
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func setCaption(_ text: String) {
+        title_ = text
+        redraw()
+    }
+
+    private func redraw() {
+        attributedTitle = NSAttributedString(
+            string: title_,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: hovered ? NSColor.labelColor : NSColor.secondaryLabelColor,
+            ])
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self,
+            userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovered = true
+        redraw()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovered = false
+        redraw()
+    }
+}
+
 /// Icon (20 pt) · 8 · name (13 pt, tail truncation) · 4 · lock on system rows · 4 · a small spinner
 /// while the app closes. The full name and the PID are in the tooltip. A helper's name is secondary
 /// so the apps read first.
@@ -641,6 +800,11 @@ private final class NameCellView: NSTableCellView {
     private let spinner = NSProgressIndicator()
     private let spinnerWidth: NSLayoutConstraint
     private let spinnerGap: NSLayoutConstraint
+    private let forceQuitButton = HoverButton()
+    private let forceQuitWidth: NSLayoutConstraint
+    private let forceQuitGap: NSLayoutConstraint
+    /// What the trailing Force Quit… does; set on every configure.
+    private var onForceQuit: (() -> Void)?
 
     private static let lockImage: NSImage? = {
         let image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: nil)
@@ -655,6 +819,9 @@ private final class NameCellView: NSTableCellView {
         let spinner = self.spinner
         spinnerWidth = spinner.widthAnchor.constraint(equalToConstant: 0)
         spinnerGap = spinner.leadingAnchor.constraint(equalTo: lock.trailingAnchor, constant: 0)
+        let button = self.forceQuitButton
+        forceQuitWidth = button.widthAnchor.constraint(equalToConstant: 0)
+        forceQuitGap = button.leadingAnchor.constraint(greaterThanOrEqualTo: spinner.trailingAnchor, constant: 0)
         super.init(frame: .zero)
         identifier = Self.identifier
 
@@ -682,6 +849,11 @@ private final class NameCellView: NSTableCellView {
         addSubview(label)
         addSubview(lock)
         addSubview(spinner)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.target = self
+        button.action = #selector(forceQuitClicked)
+        button.isHidden = true
+        addSubview(button)
         imageView = iconView
         textField = label
 
@@ -699,14 +871,22 @@ private final class NameCellView: NSTableCellView {
             spinnerWidth,
             spinner.heightAnchor.constraint(equalToConstant: 16),
             spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
-            spinner.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            forceQuitGap,
+            forceQuitWidth,
+            button.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            button.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    func configure(row: ProcessTableRow) {
+    @objc private func forceQuitClicked() {
+        onForceQuit?()
+    }
+
+    func configure(row: ProcessTableRow, onForceQuit: @escaping () -> Void) {
+        self.onForceQuit = onForceQuit
         iconView.image = row.icon
         label.stringValue = row.name
         label.textColor = row.isHelper ? .secondaryLabelColor : .labelColor
@@ -720,6 +900,18 @@ private final class NameCellView: NSTableCellView {
         spinnerGap.constant = working ? 4 : 0
         if working { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
         alphaValue = working ? 0.5 : 1
+        // Quit did not end the app: a quiet Force Quit… in place of nothing, never an error banner (D-15).
+        let offers = row.offersForceQuit
+        forceQuitButton.isHidden = !offers
+        forceQuitButton.toolTip = offers ? String(localized: "\(row.name) didn't quit. It may be waiting for you.") : nil
+        if offers {
+            forceQuitButton.setCaption(String(localized: "Force Quit…"))
+            forceQuitWidth.constant = ceil(forceQuitButton.intrinsicContentSize.width)
+            forceQuitGap.constant = 8
+        } else {
+            forceQuitWidth.constant = 0
+            forceQuitGap.constant = 0
+        }
         toolTip = row.help
     }
 }
