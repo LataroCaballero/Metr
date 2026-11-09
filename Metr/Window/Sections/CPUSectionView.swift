@@ -13,7 +13,8 @@ import SwiftUI
 struct CPUSectionView: View {
     let store: MetricsStore
 
-    @Environment(\.colorSchemeContrast) private var contrast
+    /// The system's `colorSchemeContrast`, read through `metrContrast` (see HistoryChart.swift).
+    @Environment(\.metrContrast) private var contrast
     private let text = MetricText(locale: .current)
 
     var body: some View {
@@ -130,7 +131,7 @@ private struct CoreBarRow: View {
     let fraction: Double?
     let percent: String?
 
-    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.metrContrast) private var contrast
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.accessibilitySwitchControlEnabled) private var switchControl
 

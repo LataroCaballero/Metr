@@ -14,7 +14,7 @@ import SwiftUI
 struct MemorySectionView: View {
     let store: MetricsStore
 
-    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.metrContrast) private var contrast
     private let text = MetricText(locale: .current)
 
     var body: some View {
@@ -113,7 +113,7 @@ private struct MemoryRun: Identifiable {
     }
 
     /// Normal keeps the neutral series A and a primary line; Elevated and Critical use the single
-    /// palette definition at 0.55 with a full-strength line (UI-SPEC "Chart and bar tones").
+    /// palette definition at series-A strength (0.55, 0.75 under Increase Contrast) with a full-strength line (UI-SPEC "Chart and bar tones").
     init(id: Int, points: [Point], pressure: MemoryPressure, tone: ChartTone) {
         self.id = id
         self.points = points
@@ -122,10 +122,10 @@ private struct MemoryRun: Identifiable {
             area = tone.colorA
             line = tone.colorLine
         case .warn:
-            area = Color(nsColor: TintPalette.elevated).opacity(0.55)
+            area = Color(nsColor: TintPalette.elevated).opacity(tone.seriesA)
             line = Color(nsColor: TintPalette.elevated)
         case .critical:
-            area = Color(nsColor: TintPalette.critical).opacity(0.55)
+            area = Color(nsColor: TintPalette.critical).opacity(tone.seriesA)
             line = Color(nsColor: TintPalette.critical)
         }
     }

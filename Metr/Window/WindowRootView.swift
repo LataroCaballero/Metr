@@ -35,11 +35,9 @@ struct WindowRootView: View {
     let store: MetricsStore
     let model: WindowModel
 
-    private let text = MetricText(locale: .current)
-
     var body: some View {
         NavigationSplitView {
-            sidebar
+            WindowSidebar(store: store, model: model)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
         } detail: {
             detail
@@ -47,7 +45,49 @@ struct WindowRootView: View {
         }
     }
 
-    // MARK: Sidebar
+    // MARK: Detail
+
+    /// The process table of this window session. It exists from the moment the window opens.
+    @ViewBuilder
+    private var processes: some View {
+        if let table = model.processTable {
+            ProcessesSectionView(store: store, model: table)
+        } else {
+            Color.clear
+        }
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        switch model.section {
+        case .cpu:
+            CPUSectionView(store: store)
+        case .processes:
+            processes
+        case .gpu:
+            GPUSectionView(store: store)
+        case .memory:
+            MemorySectionView(store: store)
+        case .network:
+            NetworkSectionView(store: store)
+        case .disk:
+            DiskSectionView(store: store)
+        }
+    }
+}
+
+/// The sidebar: the six sections as a system source list, each with its quiet trailing value. A
+/// struct of its own so the DEBUG snapshot renderer can draw the real rows (the full split view
+/// does not draw off screen, 03-03 A7).
+struct WindowSidebar: View {
+    let store: MetricsStore
+    let model: WindowModel
+
+    private let text = MetricText(locale: .current)
+
+    var body: some View {
+        sidebar
+    }
 
     private var sidebar: some View {
         let selection = Binding<WindowSection?>(
@@ -98,36 +138,6 @@ struct WindowRootView: View {
         case .processes:
             // Processes never has a sidebar value.
             return nil
-        }
-    }
-
-    // MARK: Detail
-
-    /// The process table of this window session. It exists from the moment the window opens.
-    @ViewBuilder
-    private var processes: some View {
-        if let table = model.processTable {
-            ProcessesSectionView(store: store, model: table)
-        } else {
-            Color.clear
-        }
-    }
-
-    @ViewBuilder
-    private var detail: some View {
-        switch model.section {
-        case .cpu:
-            CPUSectionView(store: store)
-        case .processes:
-            processes
-        case .gpu:
-            GPUSectionView(store: store)
-        case .memory:
-            MemorySectionView(store: store)
-        case .network:
-            NetworkSectionView(store: store)
-        case .disk:
-            DiskSectionView(store: store)
         }
     }
 }

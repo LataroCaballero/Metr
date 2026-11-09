@@ -23,7 +23,8 @@ struct DiskSectionView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.accessibilitySwitchControlEnabled) private var switchControl
-    @Environment(\.colorSchemeContrast) private var contrast
+    /// The system's `colorSchemeContrast`, read through `metrContrast` (see HistoryChart.swift).
+    @Environment(\.metrContrast) private var contrast
 
     private let text = MetricText(locale: .current)
 
@@ -194,13 +195,16 @@ private struct UsageBar: View {
     let fraction: Double
     let tint: RingTint
 
+    /// Increase Contrast raises the quiet track from 0.15 to 0.30 (UI-SPEC Contrast adaptations).
+    @Environment(\.metrContrast) private var contrast
+
     private var fill: Color {
         TintPalette.color(for: tint).map(Color.init(nsColor:)) ?? Color.primary
     }
 
     var body: some View {
         Capsule()
-            .fill(Color.primary.opacity(0.15))
+            .fill(Color.primary.opacity(contrast == .increased ? 0.30 : 0.15))
             .frame(height: 8)
             .overlay(alignment: .leading) {
                 GeometryReader { proxy in
@@ -314,7 +318,7 @@ private struct DiskIOHistoryChart: View {
                     )
                     .interpolationMethod(.linear)
                     .lineStyle(StrokeStyle(lineWidth: 1.5))
-                    .foregroundStyle(Color.primary.opacity(0.55))
+                    .foregroundStyle(tone.colorA)
                 }
             }
             ForEach(singles) { run in
@@ -324,7 +328,7 @@ private struct DiskIOHistoryChart: View {
                         .foregroundStyle(tone.colorLine)
                     PointMark(x: .value(ChartLabel.time, point.date), y: .value(DiskChartLabel.write, -point.write))
                         .symbolSize(24)
-                        .foregroundStyle(Color.primary.opacity(0.55))
+                        .foregroundStyle(tone.colorA)
                 }
             }
             // The zero line both series start from, in the grid tone.

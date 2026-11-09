@@ -5,31 +5,36 @@
 # window's detail column (CPU fixtures, 03-03) in light and dark to PNG files and exits.
 # Data-driven: the renderer logs "rendered-total panel=<n> welcome=<m> window=<w>" per language run.
 # The gate fails when that line is missing, when the PNGs on disk differ from the logged totals, when
-# fewer than 12 panel PNGs exist, when the welcome count is not exactly 8, when fewer than 12 window
-# PNGs exist (3 fixtures x 2 schemes x 2 languages) or when a window PNG is under 680 x 520 pt.
+# fewer than 12 panel PNGs exist, when the welcome count is not exactly 8, when fewer than
+# WINDOW_MIN window PNGs exist (the whole window matrix: 29 fixtures x 2 schemes x 2 languages = 116,
+# 03-15) or when a window PNG is under 680 x 520 pt.
 # Window PNGs are the detail column of the real window (assumption A7: the full NavigationSplitView
 # window does not draw off screen), so their floor is the minimum window 900 x 520 minus the 220 pt
 # sidebar. The 700 pt ceiling below applies to panel-*.png only.
 # Height gate (UI-SPEC "Height budget"): every panel PNG is at most 700 pt tall (pixelHeight / 2, the
 # renderer draws at scale 2), and the collapsed Top Apps list (panel-*-apps-{light,dark}.png) is at most
 # 583 pt: the 559 pt budget plus the 24 pt margin past which a taller list is a layout bug.
-# Prints "RENDER-SNAPSHOTS OK dir=<path> panel=<n> welcome=<m> window=<w> max_height=<pt>".
+# Prints "RENDER-SNAPSHOTS OK dir=<path> panel=<n> welcome=<m> window=<w> window_min=<k> max_height=<pt>".
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 # shellcheck source=../env.sh
 source scripts/env.sh
 
+# The window matrix: one PNG per fixture, scheme and language. Raise it when a fixture is added; the
+# gate then notices a renderer that silently drops fixtures.
+WINDOW_MIN=116
+
 DIR="$METR_PREVIEWS/snapshots"
 mkdir -p "$DIR"
 rm -f "$DIR"/panel-*.png "$DIR"/welcome-*.png "$DIR"/window-*.png
 
-bash scripts/verify/run-debug.sh 30 render-en \
+bash scripts/verify/run-debug.sh 60 render-en \
   --env "METR_DEBUG_RENDER_DIR=$DIR" \
   --expect 'rendered-total panel=[0-9]+ welcome=[0-9]+ window=[0-9]+' \
   --args -AppleLanguages '(en)' -AppleLocale en_US -MetrDidPresentWelcome YES
 
-bash scripts/verify/run-debug.sh 30 render-es \
+bash scripts/verify/run-debug.sh 60 render-es \
   --env "METR_DEBUG_RENDER_DIR=$DIR" \
   --expect 'rendered-total panel=[0-9]+ welcome=[0-9]+ window=[0-9]+' \
   --args -AppleLanguages '(es)' -AppleLocale es_ES -MetrDidPresentWelcome YES
@@ -58,7 +63,16 @@ welcome="$(find "$DIR" -name 'welcome-*.png' -size +0 | wc -l | tr -d ' ')"
 
 window="$(find "$DIR" -name 'window-*.png' -size +0 | wc -l | tr -d ' ')"
 [ "$window" = "$window_sum" ] || { echo "FAIL: renderer logged $window_sum window PNGs but $DIR holds $window" >&2; exit 1; }
-[ "$window_sum" -ge 12 ] || { echo "FAIL: expected at least 12 window PNGs, the renderer wrote $window_sum" >&2; exit 1; }
+[ "$window_sum" -ge "$WINDOW_MIN" ] || { echo "FAIL: expected at least $WINDOW_MIN window PNGs (the whole matrix), the renderer wrote $window_sum" >&2; exit 1; }
+
+# Increase Contrast must reach SwiftUI's environment in the high-contrast fixtures (3 fixtures x 2
+# schemes per language) and in no other fixture: the renderer logs what each rendered view read.
+for lang in en es; do
+  raised="$(grep -Ec 'render contrast=increased fixture=(cpu|memory|disk)-contrast' "$METR_LOGS/render-$lang.log" || true)"
+  stray="$(grep -E 'render contrast=increased' "$METR_LOGS/render-$lang.log" | grep -Evc 'fixture=(cpu|memory|disk)-contrast' || true)"
+  [ "$raised" = "6" ] || { echo "FAIL: $lang run: $raised high-contrast renders read Increase Contrast, expected 6" >&2; exit 1; }
+  [ "$stray" = "0" ] || { echo "FAIL: $lang run: $stray other renders read Increase Contrast" >&2; exit 1; }
+done
 
 # Window size floor (detail column of the 900 x 520 minimum window). `sips` reports pixels, scale 2.
 for f in "$DIR"/window-*.png; do
@@ -93,4 +107,4 @@ for f in "$DIR"/panel-*.png; do
   esac
 done
 
-echo "RENDER-SNAPSHOTS OK dir=$DIR panel=$count welcome=$welcome window=$window max_height=$max_height"
+echo "RENDER-SNAPSHOTS OK dir=$DIR panel=$count welcome=$welcome window=$window window_min=$WINDOW_MIN max_height=$max_height"

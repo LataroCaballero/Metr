@@ -364,6 +364,11 @@ enum DebugSnapshotRenderer {
         var processes: ProcessFixtureState = .none
         /// Row action states to render in the Processes table, by row id (Quitting, Did not quit).
         var actionStates: [String: RowActionState] = [:]
+        /// Rendered with Increase Contrast on, through `DebugContrast` (03-15).
+        var highContrast = false
+        /// Draws the real sidebar beside the section at the full content size (the sidebar fixture):
+        /// the worst-case values of every metric the sidebar can carry are fed to the store.
+        var withSidebar = false
     }
 
     private enum ProcessFixtureState {
@@ -434,6 +439,7 @@ enum DebugSnapshotRenderer {
 
     private static var windowFixtures: [WindowFixture] {
         let standard = NSSize(width: 1000, height: 640)
+        let minimum = NSSize(width: 900, height: 520)
         return [
             WindowFixture(name: "cpu", section: .cpu, populated: true, contentSize: standard),
             WindowFixture(name: "cpu-pending", section: .cpu, populated: false, contentSize: standard),
@@ -485,6 +491,27 @@ enum DebugSnapshotRenderer {
             WindowFixture(
                 name: "processes-didnotquit", section: .processes, populated: false, contentSize: standard,
                 processes: .live, actionStates: [mailID: .didNotQuit]),
+            // The sidebar at its 200 pt minimum beside the detail at the 900 x 520 window minimum, with
+            // the worst-case value of every row (100 %, Critical, 128.4 MB/s, 210 GB free) (W1 overflow).
+            WindowFixture(
+                name: "sidebar-min", section: .network, populated: true, contentSize: minimum, network: .wide,
+                withSidebar: true),
+            // The remaining sections at the window minimum, with their heaviest content.
+            WindowFixture(
+                name: "memory-min", section: .memory, populated: true, contentSize: minimum, memory: .pressure),
+            WindowFixture(name: "gpu-min", section: .gpu, populated: true, contentSize: minimum, gpu: .live),
+            WindowFixture(
+                name: "disk-min", section: .disk, populated: true, contentSize: minimum, volumes: .live,
+                diskIO: .live),
+            // Increase Contrast, drawn in the real high-contrast appearances (W3 populated).
+            WindowFixture(
+                name: "cpu-contrast", section: .cpu, populated: true, contentSize: standard, highContrast: true),
+            WindowFixture(
+                name: "memory-contrast", section: .memory, populated: true, contentSize: standard,
+                memory: .pressure, highContrast: true),
+            WindowFixture(
+                name: "disk-contrast", section: .disk, populated: true, contentSize: standard, volumes: .live,
+                diskIO: .live, highContrast: true),
         ]
     }
 
@@ -662,7 +689,29 @@ enum DebugSnapshotRenderer {
                 elapsed: 1)
             store.apply(batch, at: now - 299 + t)
         }
+        if fixture.withSidebar { applyWorstCase(to: store, at: now + 1) }
         return store
+    }
+
+    /// One more second on top of a populated fixture, with the longest value every sidebar row can
+    /// show: 100 % CPU and GPU, Critical memory, 128.4 MB/s down, 210 GB free.
+    private static func applyWorstCase(to store: MetricsStore, at time: Double) {
+        let clusters = [
+            CPUCluster(name: "Performance", usage: 1, coreUsage: [1, 1, 1, 1]),
+            CPUCluster(name: "Efficiency", usage: 1, coreUsage: [1, 1, 1, 1, 1, 1]),
+        ]
+        store.apply(
+            MetricsBatch(
+                cpu: .value(CPUReading(total: 1, user: 0.7, system: 0.3, clusters: clusters)),
+                memory: .value(
+                    MemoryReading(
+                        usedBytes: 16_500_000_000, totalBytes: totalMemory, swapUsedBytes: 4_294_967_296,
+                        freePercent: 3, pressure: .critical)),
+                disk: .value(DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)),
+                network: .value(networkReading(second: 299, state: .wide)),
+                gpu: .value(GPUReading(utilization: 1, chipName: "Apple M4", coreCount: 8)),
+                elapsed: 1),
+            at: time)
     }
 
     /// What the store is told about the processes: nothing for a fixture without any, an unreadable
@@ -731,14 +780,31 @@ enum DebugSnapshotRenderer {
     /// to get the detail column the section fixtures render in.
     private static let sidebarWidth: CGFloat = 220
 
+    /// The sidebar's minimum width (`navigationSplitViewColumnWidth(min: 200)`), for the sidebar fixture.
+    private static let sidebarMinimum: CGFloat = 200
+
+    /// Logs the contrast the window views read (`metrContrast`) inside a rendered window, so a
+    /// high-contrast fixture proves the increased tones reached the views that draw them.
+    private struct ContrastProbe: View {
+        let name: String
+        @Environment(\.metrContrast) private var contrast
+
+        var body: some View {
+            Color.clear.onAppear {
+                DebugHooks.log("render contrast=\(contrast == .increased ? "increased" : "standard") fixture=\(name)")
+            }
+        }
+    }
+
     /// Renders every window fixture in light and dark.
     ///
     /// Assumption A7 outcome (03-03): the real `WindowRootView` in an off-screen window does not
     /// draw through `cacheDisplay` or `CALayer.render`: the Liquid Glass sidebar and the grouped
     /// detail come out blank. So each fixture renders the detail column's content, the section view
     /// itself, hosted in an `NSHostingView` inside an off-screen window, which AppKit-backed grouped
-    /// Forms and Swift Charts do draw in. The sidebar and toolbar chrome are covered by the
-    /// end-of-phase human check. Width is the window's content width minus the sidebar.
+    /// Forms and Swift Charts do draw in. Width is the window's content width minus the sidebar.
+    /// The `sidebar-min` fixture also draws the real `WindowSidebar` list beside the detail; the
+    /// toolbar, the title and the glass of the real window are covered by the end-of-phase human check.
     private static func renderWindows(to directory: URL, language: String) async -> Int {
         var count = 0
         for fixture in windowFixtures {
@@ -757,22 +823,45 @@ enum DebugSnapshotRenderer {
                 if !fixture.actionStates.isEmpty {
                     table.actions.preset(actionStates: fixture.actionStates, availability: .allowed)
                 }
-                let content = detailView(for: fixture.section, store: store, table: table)
-                    .frame(width: size.width, height: size.height)
+                let detailSize = fixture.withSidebar
+                    ? NSSize(width: fixture.contentSize.width - sidebarMinimum - 1, height: fixture.contentSize.height)
+                    : size
+                var content = AnyView(
+                    detailView(for: fixture.section, store: store, table: table)
+                        .frame(width: detailSize.width, height: detailSize.height))
+                if fixture.withSidebar {
+                    // The real sidebar at its 200 pt minimum next to the detail: the split view itself
+                    // does not draw off screen (A7), its two columns do.
+                    let model = WindowModel(persistsState: false, section: fixture.section)
+                    content = AnyView(
+                        HStack(spacing: 0) {
+                            WindowSidebar(store: store, model: model).frame(width: sidebarMinimum)
+                            Divider()
+                            content
+                        })
+                }
+                let contentSize = fixture.withSidebar ? fixture.contentSize : size
+                let rendered = content
+                    .frame(width: contentSize.width, height: contentSize.height)
                     .background(Color(nsColor: .windowBackgroundColor))
                     .environment(\.colorScheme, scheme)
-                let host = NSHostingView(rootView: content)
-                host.frame = NSRect(origin: .zero, size: size)
+                    .background(ContrastProbe(name: fixture.name))
+                let host = NSHostingView(rootView: rendered)
+                host.frame = NSRect(origin: .zero, size: contentSize)
                 let window = OffscreenWindow(
-                    contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless],
+                    contentRect: NSRect(origin: .zero, size: contentSize), styleMask: [.borderless],
                     backing: .buffered, defer: false)
                 window.isReleasedWhenClosed = false
                 window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+                // NSAppearance(named:) returns nil for .accessibilityHighContrastAqua and its dark and
+                // vibrant siblings (they exist only for bestMatch), so Increase Contrast cannot be set on a window: the fixture forces it through the one accessor every
+                // window view reads (`metrContrast`), which Release compiles without the override.
+                DebugContrast.forced = fixture.highContrast ? .increased : nil
                 window.contentView = host
                 // One point of it overlaps the main screen's left edge, because a window with no
                 // visible point is occluded and SwiftUI stops drawing it; it is made see-through.
                 let edge = NSScreen.screens.first?.frame.minX ?? 0
-                window.setFrameOrigin(NSPoint(x: edge - size.width + 1, y: 0))
+                window.setFrameOrigin(NSPoint(x: edge - contentSize.width + 1, y: 0))
                 window.alphaValue = 0.01
                 window.ignoresMouseEvents = true
                 window.orderFront(nil)
@@ -787,6 +876,7 @@ enum DebugSnapshotRenderer {
                 }
                 window.close()
                 DebugChartHover.preset = nil
+                DebugContrast.forced = nil
             }
         }
         return count

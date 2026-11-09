@@ -13,7 +13,7 @@ import SwiftUI
 struct GPUSectionView: View {
     let store: MetricsStore
 
-    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.metrContrast) private var contrast
     private let text = MetricText(locale: .current)
 
     var body: some View {

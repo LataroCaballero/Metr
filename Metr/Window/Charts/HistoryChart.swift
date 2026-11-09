@@ -29,6 +29,27 @@ struct ChartTone {
     var colorGrid: Color { Color.primary.opacity(grid) }
 }
 
+extension EnvironmentValues {
+    /// The contrast the window's views draw with: the system's Increase Contrast setting. The window
+    /// views read this instead of `colorSchemeContrast` so the DEBUG snapshot renderer can show the
+    /// increased tones: AppKit offers no high-contrast `NSAppearance` to set on an off-screen window
+    /// (`NSAppearance(named:)` returns nil for those names). Release has no override.
+    var metrContrast: ColorSchemeContrast {
+        #if DEBUG
+        if let forced = DebugContrast.forced { return forced }
+        #endif
+        return colorSchemeContrast
+    }
+}
+
+#if DEBUG
+/// DEBUG only: Increase Contrast forced on by the snapshot renderer for its high-contrast fixtures.
+@MainActor
+enum DebugContrast {
+    static var forced: ColorSchemeContrast?
+}
+#endif
+
 /// Maps the buffer's clock (seconds since the reference date) to the chart's `Date` axis.
 enum HistoryChartTime {
     static func date(_ time: Double) -> Date {
@@ -72,7 +93,7 @@ private struct HistoryChartStyle: ViewModifier {
     let selection: Binding<Date?>
     let yLabel: (Double) -> String?
 
-    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.metrContrast) private var contrast
 
     func body(content: Content) -> some View {
         let tone = ChartTone(contrast: contrast)

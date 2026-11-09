@@ -12,7 +12,7 @@ import SwiftUI
 struct NetworkSectionView: View {
     let store: MetricsStore
 
-    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.metrContrast) private var contrast
     private let text = MetricText(locale: .current)
 
     var body: some View {
@@ -220,7 +220,7 @@ private struct NetworkHistoryChart: View {
                     )
                     .interpolationMethod(.linear)
                     .lineStyle(StrokeStyle(lineWidth: 1.5))
-                    .foregroundStyle(Color.primary.opacity(0.55))
+                    .foregroundStyle(tone.colorA)
                 }
             }
             ForEach(singles) { run in
@@ -230,7 +230,7 @@ private struct NetworkHistoryChart: View {
                         .foregroundStyle(tone.colorLine)
                     PointMark(x: .value(ChartLabel.time, point.date), y: .value(NetworkChartLabel.upload, -point.up))
                         .symbolSize(24)
-                        .foregroundStyle(Color.primary.opacity(0.55))
+                        .foregroundStyle(tone.colorA)
                 }
             }
             // The zero line both series start from, in the grid tone.
