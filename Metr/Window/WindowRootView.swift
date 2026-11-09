@@ -119,15 +119,7 @@ struct WindowRootView: View {
         case .cpu:
             CPUSectionView(store: store)
         case .processes:
-            #if DEBUG
-            if DebugHooks.chromeProbeEnabled {
-                processes.modifier(ChromeProbeMenu())
-            } else {
-                processes
-            }
-            #else
             processes
-            #endif
         case .gpu:
             GPUSectionView(store: store)
         case .memory:
@@ -161,22 +153,3 @@ private struct SidebarRow: View {
         .accessibilityElement(children: .combine)
     }
 }
-
-#if DEBUG
-/// DEBUG only: the toolbar menu that Processes will carry (03-14), attached to the real Processes
-/// view, so the chrome probe can check that the AppKit host bridges it next to the real search field
-/// (RESEARCH Open Question 2). The temporary search field of 03-01 is gone: the section has its own.
-private struct ChromeProbeMenu: ViewModifier {
-    func body(content: Content) -> some View {
-        content.toolbar {
-            ToolbarItem {
-                Menu {
-                    Button("Close") {}
-                } label: {
-                    Image(systemName: "xmark.circle")
-                }
-            }
-        }
-    }
-}
-#endif

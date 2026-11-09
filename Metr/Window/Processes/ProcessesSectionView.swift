@@ -30,6 +30,37 @@ struct ProcessesSectionView: View {
             .searchable(text: Bindable(model).searchText, placement: .toolbar, prompt: "Search processes")
             // Esc steps back: the focused field clears its own text first, then the selection ends.
             .onExitCommand { model.clearSelection() }
+            .toolbar { quitControl }
+    }
+
+    // MARK: Quit and Force Quit (WIN-04, D-15)
+
+    /// The toolbar control of the selected row: one menu with an ⓧ, never an action by itself and
+    /// with no keyboard shortcut, so a click cannot quit anything (UI-SPEC "Toolbar control"). It is
+    /// disabled with nothing selected, and for a protected, other-user or un-signalable row it is
+    /// disabled and its tooltip says why.
+    @ToolbarContentBuilder
+    private var quitControl: some ToolbarContent {
+        let menu = model.selectedActionMenu
+        let usable = menu?.enabled == true && menu?.items.isEmpty == false
+        let defaultHelp = String(localized: "Quit or force quit the selected process")
+        ToolbarItem {
+            Menu {
+                if let menu, let id = model.selection.first, !menu.items.isEmpty {
+                    ForEach(menu.items, id: \.kind) { item in
+                        Button(item.title) { model.perform(item.kind, on: id) }
+                    }
+                } else {
+                    // Never an empty menu: the system drops a toolbar menu with nothing in it.
+                    Button("Quit") {}.disabled(true)
+                }
+            } label: {
+                Image(systemName: "xmark.circle")
+            }
+            .disabled(!usable)
+            .help((usable ? nil : menu?.reason) ?? defaultHelp)
+            .accessibilityLabel(defaultHelp)
+        }
     }
 
     /// "System processes not shown." while the other-users half is failing; the user's own

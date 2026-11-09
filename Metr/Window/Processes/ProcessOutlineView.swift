@@ -33,6 +33,7 @@ struct ProcessOutlineView: NSViewRepresentable {
         let coordinator = context.coordinator
         let outline = ProcessOutline()
         outline.onCancel = { [weak model] in model?.clearSelection() }
+        outline.onMenu = { [weak coordinator] id in coordinator?.contextMenu(for: id) }
         outline.style = .inset
         outline.usesAlternatingRowBackgroundColors = true
         outline.allowsMultipleSelection = false
@@ -461,17 +462,21 @@ struct ProcessOutlineView: NSViewRepresentable {
                 cell.configure(row: row)
                 return cell
             case .cpu:
-                return numberCell(in: outlineView, identifier: identifier, text: text.processCPU(row.cpuPercent), active: lastActive == .cpu)
+                return numberCell(
+                    in: outlineView, identifier: identifier, text: text.processCPU(row.cpuPercent),
+                    active: lastActive == .cpu, row: row, quittingText: true)
             case .memory:
-                return numberCell(in: outlineView, identifier: identifier, text: text.processMemory(row.footprintBytes), active: lastActive == .memory)
+                return numberCell(
+                    in: outlineView, identifier: identifier, text: text.processMemory(row.footprintBytes),
+                    active: lastActive == .memory, row: row)
             case .diskRead:
                 return numberCell(
                     in: outlineView, identifier: identifier, text: text.rate(row.diskReadPerSec),
-                    active: lastActive == .diskRead, help: Self.diskHelp(for: row))
+                    active: lastActive == .diskRead, help: Self.diskHelp(for: row), row: row)
             case .diskWrite:
                 return numberCell(
                     in: outlineView, identifier: identifier, text: text.rate(row.diskWritePerSec),
-                    active: lastActive == .diskWrite, help: Self.diskHelp(for: row))
+                    active: lastActive == .diskWrite, help: Self.diskHelp(for: row), row: row)
             }
         }
 
@@ -481,15 +486,42 @@ struct ProcessOutlineView: NSViewRepresentable {
             row.isOwn ? nil : String(localized: "Disk activity isn't available for system processes.")
         }
 
+        /// `quittingText` marks the CPU cell, which reads "Quitting…" while the row's app closes (D-15).
+        /// Every cell of a working row is dimmed to half, so the whole row reads as on its way out.
         private func numberCell(
             in outlineView: NSOutlineView, identifier: NSUserInterfaceItemIdentifier, text: String, active: Bool,
-            help: String? = nil
+            help: String? = nil, row: ProcessTableRow, quittingText: Bool = false
         ) -> NSView {
             let cell =
                 outlineView.makeView(withIdentifier: identifier, owner: nil) as? NumberCellView
                 ?? NumberCellView(identifier: identifier)
-            cell.configure(text: text, active: active, help: help)
+            cell.configure(
+                text: text, active: active, help: help, working: row.isWorking, showsQuitting: quittingText)
             return cell
+        }
+
+        // MARK: Context menu (D-15)
+
+        /// The right-click menu of a row: the same items as the toolbar control, text only. A row that
+        /// may not be acted on keeps its items greyed out, then a divider and the reason (PROC-07, D-17).
+        func contextMenu(for id: String) -> NSMenu? {
+            guard let description = model.actionMenu(for: id), !description.items.isEmpty else { return nil }
+            let menu = NSMenu()
+            menu.autoenablesItems = false
+            for item in description.items {
+                let entry = ClosureMenuItem(title: item.title) { [weak self] in
+                    self?.model.perform(item.kind, on: id)
+                }
+                entry.isEnabled = description.enabled
+                menu.addItem(entry)
+            }
+            if let reason = description.reason {
+                menu.addItem(.separator())
+                let line = NSMenuItem(title: reason, action: nil, keyEquivalent: "")
+                line.isEnabled = false
+                menu.addItem(line)
+            }
+            return menu
         }
 
         func outlineViewItemDidExpand(_ notification: Notification) {
@@ -525,9 +557,39 @@ struct ProcessOutlineView: NSViewRepresentable {
 /// freeze (UI-SPEC Keyboard). A focused search field clears its own text first, natively.
 private final class ProcessOutline: NSOutlineView {
     var onCancel: (() -> Void)?
+    /// Builds the context menu of a row by id; nil draws no menu.
+    var onMenu: ((String) -> NSMenu?)?
 
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
+    }
+
+    /// Right-click on a row selects it first, as Finder does, so the toolbar control, the freeze and
+    /// the menu all name the same row. Empty space has no menu.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let row = self.row(at: convert(event.locationInWindow, from: nil))
+        guard row >= 0, let node = item(atRow: row) as? ProcessOutlineView.Node else { return nil }
+        if !selectedRowIndexes.contains(row) { selectRowIndexes([row], byExtendingSelection: false) }
+        return onMenu?(node.id)
+    }
+}
+
+/// A menu item that runs a closure. It is its own target, so the menu needs no responder chain.
+private nonisolated final class ClosureMenuItem: NSMenuItem {
+    private let handler: @MainActor () -> Void
+
+    init(title: String, handler: @escaping @MainActor () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        target = self
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    @objc private func fire() {
+        let run = handler
+        MainActor.assumeIsolated { run() }
     }
 }
 
@@ -565,8 +627,9 @@ private final class TableScrollView: NSScrollView {
 
 // MARK: Cells
 
-/// Icon (20 pt) · 8 · name (13 pt, tail truncation) · 4 · lock on system rows. The full name and the
-/// PID are in the tooltip. A helper's name is secondary so the apps read first.
+/// Icon (20 pt) · 8 · name (13 pt, tail truncation) · 4 · lock on system rows · 4 · a small spinner
+/// while the app closes. The full name and the PID are in the tooltip. A helper's name is secondary
+/// so the apps read first.
 private final class NameCellView: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("process.name")
 
@@ -575,6 +638,9 @@ private final class NameCellView: NSTableCellView {
     private let lockView = NSImageView()
     private let lockWidth: NSLayoutConstraint
     private let lockGap: NSLayoutConstraint
+    private let spinner = NSProgressIndicator()
+    private let spinnerWidth: NSLayoutConstraint
+    private let spinnerGap: NSLayoutConstraint
 
     private static let lockImage: NSImage? = {
         let image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: nil)
@@ -586,6 +652,9 @@ private final class NameCellView: NSTableCellView {
         let lock = self.lockView
         lockWidth = lock.widthAnchor.constraint(equalToConstant: 0)
         lockGap = lock.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 0)
+        let spinner = self.spinner
+        spinnerWidth = spinner.widthAnchor.constraint(equalToConstant: 0)
+        spinnerGap = spinner.leadingAnchor.constraint(equalTo: lock.trailingAnchor, constant: 0)
         super.init(frame: .zero)
         identifier = Self.identifier
 
@@ -603,9 +672,16 @@ private final class NameCellView: NSTableCellView {
         lock.contentTintColor = .secondaryLabelColor
         lock.setContentCompressionResistancePriority(.required, for: .horizontal)
         lock.setAccessibilityElement(false)
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isIndeterminate = true
+        spinner.isDisplayedWhenStopped = false
+        spinner.setAccessibilityElement(false)
         addSubview(iconView)
         addSubview(label)
         addSubview(lock)
+        addSubview(spinner)
         imageView = iconView
         textField = label
 
@@ -619,7 +695,11 @@ private final class NameCellView: NSTableCellView {
             lockGap,
             lockWidth,
             lock.centerYAnchor.constraint(equalTo: centerYAnchor),
-            lock.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            spinnerGap,
+            spinnerWidth,
+            spinner.heightAnchor.constraint(equalToConstant: 16),
+            spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
+            spinner.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
         ])
     }
 
@@ -634,6 +714,12 @@ private final class NameCellView: NSTableCellView {
         lockView.isHidden = !locked
         lockWidth.constant = locked ? 12 : 0
         lockGap.constant = locked ? 4 : 0
+        // A working row is dimmed to half with a small spinner after its name (D-15).
+        let working = row.isWorking
+        spinnerWidth.constant = working ? 16 : 0
+        spinnerGap.constant = working ? 4 : 0
+        if working { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
+        alphaValue = working ? 0.5 : 1
         toolTip = row.help
     }
 }
@@ -645,6 +731,7 @@ private final class NumberCellView: NSTableCellView {
 
     private static let regular = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
     private static let semibold = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+    private static let quitting = NSFont.systemFont(ofSize: 11)
 
     init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
@@ -666,10 +753,18 @@ private final class NumberCellView: NSTableCellView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    func configure(text: String, active: Bool, help: String? = nil) {
+    func configure(text: String, active: Bool, help: String? = nil, working: Bool = false, showsQuitting: Bool = false) {
+        alphaValue = working ? 0.5 : 1
+        toolTip = help
+        if working && showsQuitting {
+            // The CPU number gives way to one quiet line while the app closes (D-15).
+            label.stringValue = String(localized: "Quitting…")
+            label.font = Self.quitting
+            label.textColor = .secondaryLabelColor
+            return
+        }
         label.stringValue = text
         label.font = active ? Self.semibold : Self.regular
         label.textColor = active ? .labelColor : .secondaryLabelColor
-        toolTip = help
     }
 }

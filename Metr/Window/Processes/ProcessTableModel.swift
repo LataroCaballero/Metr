@@ -27,6 +27,11 @@ struct ProcessTableRow: Identifiable, Equatable {
     let diskReadPerSec: Double?
     let diskWritePerSec: Double?
     let helperCount: Int
+    /// What the row may offer, from the guard: only `.allowed` offers Quit and Force Quit, and a
+    /// disabled row carries the reason (PROC-07, D-17).
+    let availability: ActionAvailability
+    /// Where the row is in its action: Quitting dims it, Did-not-quit offers Force Quit… (D-15).
+    let actionState: RowActionState
     /// Every helper of a group, in the active order. Empty for a helper and a standalone process.
     let children: [ProcessTableRow]
 
@@ -36,8 +41,19 @@ struct ProcessTableRow: Identifiable, Equatable {
             id: id, name: name, help: help, icon: icon, kind: kind, pid: pid, isHelper: isHelper,
             isOwn: isOwn, cpuPercent: cpuPercent, footprintBytes: footprintBytes,
             diskReadPerSec: diskReadPerSec, diskWritePerSec: diskWritePerSec, helperCount: helperCount,
-            children: children)
+            availability: availability, actionState: actionState, children: children)
     }
+
+    /// Quit or Force Quit was sent and the process has not exited yet: the row is dimmed (D-15).
+    var isWorking: Bool {
+        switch actionState {
+        case .quitting, .forceQuitting: return true
+        case .rest, .didNotQuit, .confirming: return false
+        }
+    }
+
+    /// Quit did not end the app: the Name cell offers Force Quit… in place (D-15).
+    var offersForceQuit: Bool { actionState == .didNotQuit && availability == .allowed }
 
     /// The comparable values the column headers sort by. The table never sorts its data with them:
     /// the model orders the rows (`ProcessTableOrdering`); they exist for the header indicator.
@@ -79,6 +95,10 @@ final class ProcessTableModel {
     /// The text of the toolbar search field (D-13). Never persisted: it dies with the window.
     var searchText = ""
 
+    /// The one Quit / Force Quit state machine of this window session, the same type the panel uses
+    /// (RESEARCH Pitfall 8). Every action of the table goes through it and its guard.
+    let actions = ProcessActionController()
+
     /// True while the pointer is over the table: the order holds still so the next click lands on
     /// the row the user aimed at (D-16, T-03-27). Observed, because a change must re-evaluate the rows.
     private(set) var isPointerInTable = false
@@ -89,7 +109,8 @@ final class ProcessTableModel {
 
     /// Whether the order is held still (D-16): the pointer is over the table or a row is selected.
     /// A selected row never moves, so a toolbar action can never act on a row that slid away.
-    var isFrozen: Bool { isPointerInTable || !selection.isEmpty }
+    /// A Quitting row or an open Force Quit confirmation holds it too (D-15).
+    var isFrozen: Bool { isPointerInTable || !selection.isEmpty || actions.holdsOrder }
 
     /// Groups the current search opened because only some of their helpers matched. Derived from the
     /// query and the reading on every build, never the user's own expansion (D-13).
@@ -117,9 +138,18 @@ final class ProcessTableModel {
     /// and what a deep link can find.
     @ObservationIgnored private var readingGroupIDs: Set<String> = []
     @ObservationIgnored private var loggedKey: String?
+    /// Every row of the newest build, whatever a search hides, by id, with the name of the app a helper
+    /// belongs to. The toolbar control and the menus read the row they act on from here.
+    @ObservationIgnored private var lookup: [String: LookupEntry] = [:]
     /// The sort the rows were last built with, so the first build after a header click knows it must
     /// ignore the freeze.
     @ObservationIgnored private var builtSort: Sort?
+
+    private struct LookupEntry {
+        let row: ProcessTableRow
+        /// The app a helper belongs to; nil for an app or standalone row.
+        let appName: String?
+    }
 
     private struct Sort: Equatable {
         var column: ProcessTableColumn
@@ -133,6 +163,8 @@ final class ProcessTableModel {
         var frozen: Bool
         var expanded: Set<String>
         var query: String?
+        var actionStates: [String: RowActionState]
+        var exited: Set<String>
     }
 
     init(persistsState: Bool) {
@@ -231,6 +263,40 @@ final class ProcessTableModel {
         if openAndLive != expanded { expanded = openAndLive }
         let selectedAndShown = selection.intersection(liveIDs)
         if selectedAndShown != selection { selection = selectedAndShown }
+        // A row that left the reading takes its action state, poll and confirmation with it.
+        let gone = actions.actionStates.keys.filter { lookup[$0] == nil }
+        if !gone.isEmpty { actions.forget(gone) }
+    }
+
+    // MARK: Quit and Force Quit (WIN-04, D-15)
+
+    /// What the toolbar control and the context menu offer for one row, from the guard's availability
+    /// and the row's action state. nil when the row is not in the newest reading.
+    func actionMenu(for id: String) -> ProcessActionMenu? {
+        guard let entry = lookup[id] else { return nil }
+        let row = entry.row
+        var items: [ProcessActionMenu.Item] = []
+        if !row.isHelper {
+            items.append(.init(kind: .quit, title: String(localized: "Quit \(row.name)")))
+        }
+        var reason: String?
+        if case .disabled(let why) = row.availability { reason = why.menuText }
+        let idle = row.actionState == .rest || row.actionState == .didNotQuit
+        return ProcessActionMenu(items: items, enabled: row.availability == .allowed && idle, reason: reason)
+    }
+
+    /// The menu of the single selected row, for the toolbar control.
+    var selectedActionMenu: ProcessActionMenu? {
+        guard selection.count == 1, let id = selection.first else { return nil }
+        return actionMenu(for: id)
+    }
+
+    /// Runs one menu item on a row. Quit goes to the shared controller, which re-reads the process
+    /// from the kernel before anything is sent (PROC-05, PROC-07).
+    func perform(_ kind: ProcessActionMenu.Kind, on id: String) {
+        switch kind {
+        case .quit: actions.quit(id)
+        }
     }
 
     /// The root rows for one reading. Grouping runs once per sequence; ordering and row building
@@ -241,17 +307,22 @@ final class ProcessTableModel {
         let frozen = isFrozen
         let key = MemoKey(
             sequence: snapshot.sequence, column: column, ascending: ascending, frozen: frozen,
-            expanded: expanded, query: query)
+            expanded: expanded, query: query, actionStates: actions.actionStates, exited: actions.exited)
         if let memo, memo.key == key { return memo.rows }
 
         let effective = ProcessTableOrdering.effectiveColumn(column, cpuReady: snapshot.cpuReady)
         let sortChanged = builtSort != nil && builtSort != Sort(column: column, ascending: ascending)
         builtSort = Sort(column: column, ascending: ascending)
-        let live = groups(for: snapshot)
+        let all = groups(for: snapshot)
+        // A row whose process was seen to exit after Quit is hidden at once, before the next reading.
+        actions.retainExited(in: all.map(\.id) + all.flatMap { $0.helpers.map(ProcessNaming.helperID(of:)) })
+        actions.resetRoles()
+        let live = all.filter { !actions.isExited($0.id) }
         let me = getuid()
         let pid = getpid()
 
         var rowsByID: [String: ProcessTableRow] = [:]
+        lookup.removeAll(keepingCapacity: true)
         var items: [ProcessTableItem] = []
         var newChildren: [String: [String]] = [:]
         for group in live {
@@ -260,6 +331,8 @@ final class ProcessTableModel {
                 sortChanged: sortChanged, children: &newChildren)
             guard rowsByID[group.id] == nil else { continue }
             rowsByID[group.id] = row
+            lookup[group.id] = LookupEntry(row: row, appName: nil)
+            for child in row.children { lookup[child.id] = LookupEntry(row: child, appName: row.name) }
             items.append(
                 ProcessTableItem(
                     id: row.id, name: row.name, cpuPercent: row.cpuPercent,
@@ -315,6 +388,7 @@ final class ProcessTableModel {
         logSearchAndFreeze(
             sequence: snapshot.sequence, query: query, rows: rows, helpers: helperTotal, order: order,
             frozen: frozen, sortChanged: sortChanged)
+        logActions()
         return rows
     }
 
@@ -336,7 +410,7 @@ final class ProcessTableModel {
 
         var childRows: [String: ProcessTableRow] = [:]
         var items: [ProcessTableItem] = []
-        for sample in group.helpers {
+        for sample in group.helpers where !actions.isExited(ProcessNaming.helperID(of: sample)) {
             let child = helperRow(for: sample, appName: appName ?? "", icon: icon, selfPID: selfPID, selfUID: selfUID)
             guard childRows[child.id] == nil else { continue }
             childRows[child.id] = child
@@ -353,6 +427,18 @@ final class ProcessTableModel {
 
         let representative = group.main ?? group.helpers.min { $0.identity.pid < $1.identity.pid }
         let pid = representative?.identity.pid ?? 0
+        // The role and availability come from the main process only. An app group with no main
+        // process running offers nothing; a root-owned bundle is view-only (Phase 2 Q5).
+        var availability = ActionAvailability.disabled(.cannotSignal)
+        if let main = group.main {
+            availability = actions.availability(pid: main.identity.pid, uid: main.uid, path: main.path)
+            let role: RowRole =
+                group.appPath.map { .app(appPath: $0, main: main.identity, mainPath: main.path) }
+                ?? .standalone(identity: main.identity, path: main.path)
+            actions.setRole(role, availability: availability, for: group.id)
+        } else {
+            actions.setRole(nil, availability: availability, for: group.id)
+        }
         return ProcessTableRow(
             id: group.id,
             name: name,
@@ -367,6 +453,8 @@ final class ProcessTableModel {
             diskReadPerSec: group.diskReadPerSec,
             diskWritePerSec: group.diskWritePerSec,
             helperCount: group.helpers.count,
+            availability: availability,
+            actionState: actions.state(for: group.id),
             children: order.compactMap { childRows[$0] })
     }
 
@@ -374,8 +462,11 @@ final class ProcessTableModel {
         for sample: ProcessSample, appName: String, icon: NSImage, selfPID: Int32, selfUID: UInt32
     ) -> ProcessTableRow {
         let name = naming.helperName(of: sample, appName: appName)
+        let id = ProcessNaming.helperID(of: sample)
+        let availability = actions.availability(pid: sample.identity.pid, uid: sample.uid, path: sample.path)
+        actions.setRole(.helper(identity: sample.identity, path: sample.path), availability: availability, for: id)
         return ProcessTableRow(
-            id: ProcessNaming.helperID(of: sample),
+            id: id,
             name: name,
             help: String(localized: "\(name) · PID \(Int(sample.identity.pid))"),
             icon: icon,
@@ -389,6 +480,8 @@ final class ProcessTableModel {
             diskReadPerSec: sample.diskReadPerSec,
             diskWritePerSec: sample.diskWritePerSec,
             helperCount: 0,
+            availability: availability,
+            actionState: actions.state(for: id),
             children: [])
     }
 
@@ -451,7 +544,31 @@ final class ProcessTableModel {
         #endif
     }
 
+    /// `table actions quitting=<n> forcequitting=<n> didnotquit=<n> confirming=<n> exited=<n>` when the
+    /// counts change. Numbers only, never a name or a path.
+    private func logActions() {
+        #if DEBUG
+        var counts = [0, 0, 0, 0]
+        for state in actions.actionStates.values {
+            switch state {
+            case .quitting: counts[0] += 1
+            case .forceQuitting: counts[1] += 1
+            case .didNotQuit: counts[2] += 1
+            case .confirming: counts[3] += 1
+            case .rest: break
+            }
+        }
+        let line =
+            "table actions quitting=\(counts[0]) forcequitting=\(counts[1]) didnotquit=\(counts[2])"
+            + " confirming=\(counts[3]) exited=\(actions.exited.count)"
+        guard loggedActions != line else { return }
+        loggedActions = line
+        DebugHooks.log(line)
+        #endif
+    }
+
     #if DEBUG
+    @ObservationIgnored private var loggedActions: String?
     @ObservationIgnored private var loggedSearchKey: String?
     @ObservationIgnored private var loggedFreezeKey: String?
     /// The order the table held when the current freeze began, by id.
@@ -465,7 +582,36 @@ final class ProcessTableModel {
         setPointerInTable(inside)
     }
 
+    /// The window script's `quit:<pid>` step: Quit on the app or standalone row whose process is this pid,
+    /// through the same controller, guard and coordinator as a click. Verification quits only a process
+    /// the script's own author spawned; nothing else is addressable by it. Returns whether a row matched.
+    @discardableResult
+    func scriptQuit(pid: Int32) -> Bool {
+        guard let row = debugRows.first(where: { $0.pid == pid && !$0.isHelper }) else { return false }
+        actions.quit(row.id)
+        return true
+    }
+
     /// The rows of the newest reading, for the DEBUG outline probe. Empty before the first read.
     var debugRows: [ProcessTableRow] { memo?.rows ?? [] }
     #endif
+}
+
+/// The items one row offers in the toolbar control and in its context menu (D-15). Items are built
+/// only for the actions the row's role has: an app or standalone process can be quit, a helper cannot.
+struct ProcessActionMenu: Equatable {
+    enum Kind: Equatable {
+        case quit
+    }
+
+    struct Item: Equatable {
+        let kind: Kind
+        let title: String
+    }
+
+    let items: [Item]
+    /// The items may be chosen: the row is allowed and not already working.
+    let enabled: Bool
+    /// Why a protected, other-user or un-signalable row offers nothing (D-17).
+    let reason: String?
 }

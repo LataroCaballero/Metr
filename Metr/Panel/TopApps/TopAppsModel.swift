@@ -101,28 +101,11 @@ final class TopAppsModel {
     @ObservationIgnored private var memo: (key: MemoKey, display: TopAppsDisplay)?
     @ObservationIgnored private var lastSort: SortColumn?
 
-    /// What each visible row stands for, by row id, for the actions (D-16).
-    @ObservationIgnored private var roles: [String: RowRole] = [:]
-    /// The availability each visible row was built with, by row id (app, standalone and helper rows).
-    @ObservationIgnored private var availabilities: [String: ActionAvailability] = [:]
     /// The helper ids on screen in the newest build, so their action state outlives a re-render.
     @ObservationIgnored private var shownHelperIDs: Set<String> = []
-    /// What the user was asked to confirm, by row id: the role as it was when the confirmation
-    /// opened. If the app has restarted since, the identity no longer matches and nothing is sent.
-    @ObservationIgnored private var confirmedRoles: [String: RowRole] = [:]
-    @ObservationIgnored private let guardian = ActionGuard.system()
-    @ObservationIgnored private let coordinator = QuitCoordinator()
-
-    /// Each row's action state, by row id. Observed: the row views dim and restore from it. A row
-    /// with no entry is at rest.
-    private(set) var actionStates: [String: RowActionState] = [:]
-    /// Rows whose process was seen to exit after Quit: hidden at once, before the next reading.
-    @ObservationIgnored private var exitedIDs: Set<String> = []
-    /// One exit poll per quitting row, only while the row is Quitting or Force-quitting.
-    @ObservationIgnored private var pollTasks: [String: Task<Void, Never>] = [:]
-
-    /// One monotonic clock for all action timing.
-    private static var now: Double { ProcessInfo.processInfo.systemUptime }
+    /// The one Quit / Force Quit state machine, shared in type with the window's table (RESEARCH
+    /// Pitfall 8). The panel model keeps only the display logic; every action forwards to it.
+    @ObservationIgnored private let actions = ProcessActionController()
 
     private struct MemoKey: Equatable {
         var sequence: UInt64
@@ -136,28 +119,16 @@ final class TopAppsModel {
     init() {}
 
     #if DEBUG
-    /// What every row of a preset model may do, so a fixture does not depend on whether a synthetic
-    /// pid happens to exist on the machine that renders it. nil in the app.
-    @ObservationIgnored private var presetAvailability: ActionAvailability?
-
     /// DEBUG only, for the snapshot renderer: opens a group and puts rows into action states
     /// (Quitting, Did not quit, Confirming) without a click or a signal. Compiled out of Release.
+    /// A preset model answers `.allowed` for every row when asked to.
     func preset(
         expanded: String?, actionStates: [String: RowActionState], availability: ActionAvailability? = nil
     ) {
         expandedGroupID = expanded
-        self.actionStates = actionStates
-        presetAvailability = availability
+        actions.preset(actionStates: actionStates, availability: availability)
     }
     #endif
-
-    /// What a process may offer, from the guard. A preset model (DEBUG) answers with its fixed value.
-    private func availability(pid: Int32, uid: UInt32, path: String?) -> ActionAvailability {
-        #if DEBUG
-        if let presetAvailability { return presetAvailability }
-        #endif
-        return guardian.availability(pid: pid, uid: uid, path: path)
-    }
 
     /// The view reports the pointer entering or leaving the list rows.
     func setPointerInList(_ inside: Bool) {
@@ -169,32 +140,22 @@ final class TopAppsModel {
     /// Called after each process reading, so a stuck freeze lasts one tick at most.
     func runFreezeWatchdog() {
         // A confirmation open keeps the order as it is; nothing is released under it (D-14).
-        guard isPointerInList, !actionStates.values.contains(.confirming), let frame = listScreenFrame else { return }
+        guard isPointerInList, !actions.actionStates.values.contains(.confirming), let frame = listScreenFrame else { return }
         if !frame.contains(NSEvent.mouseLocation) { isPointerInList = false }
     }
 
     /// Opens a group, or closes it when it is already open.
     func toggle(_ id: String) {
         // The helpers of the group on screen leave with it; their actions leave with them.
-        if let helpers = previousHelpers { forgetActions(of: helpers.ids) }
+        if let helpers = previousHelpers { actions.forget(helpers.ids) }
         expandedGroupID = expandedGroupID == id ? nil : id
         previousHelpers = nil
-    }
-
-    /// Drops the action state, the poll and the open confirmation of these rows.
-    private func forgetActions(of ids: [String]) {
-        for id in ids {
-            pollTasks[id]?.cancel()
-            pollTasks[id] = nil
-            actionStates[id] = nil
-            confirmedRoles[id] = nil
-        }
     }
 
     /// Closes the open group once it is no longer on screen (it exited, or ranks out of the list).
     func collapse(unlessVisible visible: [String]) {
         // A row that left the screen takes its action state with it.
-        forgetActions(of: actionStates.keys.filter { !visible.contains($0) && !shownHelperIDs.contains($0) })
+        actions.forget(actions.actionStates.keys.filter { !visible.contains($0) && !shownHelperIDs.contains($0) })
         if let id = expandedGroupID, !visible.contains(id) {
             expandedGroupID = nil
             previousHelpers = nil
@@ -223,17 +184,17 @@ final class TopAppsModel {
             }
             let key = MemoKey(
                 sequence: snapshot.sequence, sort: sort, frozen: isPointerInList, expanded: expandedGroupID,
-                actions: actionStates, exited: exitedIDs)
+                actions: actions.actionStates, exited: actions.exited)
             if let memo, memo.key == key { return memo.display }
 
             let sortChanged = lastSort != nil && lastSort != sort
-            let holding = actionStates.values.contains(where: RowActions.holdsOrder)
+            let holding = actions.holdsOrder
             let frozen = (isPointerInList || holding) && !sortChanged
             let effective = RankingEngine.effectiveColumn(sort, cpuReady: snapshot.cpuReady)
             let live = groups(for: snapshot)
-            exitedIDs.formIntersection(live.map(\.id) + live.flatMap { $0.helpers.map(Self.helperID(of:)) })
+            actions.retainExited(in: live.map(\.id) + live.flatMap { $0.helpers.map(Self.helperID(of:)) })
             let byID = Dictionary(
-                live.filter { !exitedIDs.contains($0.id) }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                live.filter { !actions.isExited($0.id) }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let items = byID.values.map {
                 RankItem(
                     id: $0.id, cpuPercent: $0.cpuPercent, footprintBytes: $0.footprintBytes,
@@ -242,8 +203,7 @@ final class TopAppsModel {
             let ids = RankingEngine.next(
                 items, column: sort, cpuReady: snapshot.cpuReady, previous: previousApps, frozen: frozen,
                 limit: Self.rowLimit)
-            roles.removeAll(keepingCapacity: true)
-            availabilities.removeAll(keepingCapacity: true)
+            actions.resetRoles()
             shownHelperIDs.removeAll(keepingCapacity: true)
             let rows = ids.compactMap { byID[$0] }.map { row(for: $0, sort: effective, frozen: frozen) }
             let display = TopAppsDisplay(content: .rows(rows), effectiveSort: effective)
@@ -281,15 +241,14 @@ final class TopAppsModel {
     private func row(for group: ProcessGroup, sort: SortColumn, frozen: Bool) -> TopAppRowData {
         let appName = group.appPath.map(naming.appDisplayName(atPath:))
         let (role, availability) = actionInfo(for: group)
-        roles[group.id] = role
-        availabilities[group.id] = availability
+        actions.setRole(role, availability: availability, for: group.id)
         let open = expandedGroupID == group.id && !group.helpers.isEmpty
         var helpers: [HelperRowData] = []
         var more = 0
         if open {
             // The helpers use the same rules and the same freeze as the rows above them.
             let byID = Dictionary(
-                group.helpers.filter { !exitedIDs.contains(Self.helperID(of: $0)) }
+                group.helpers.filter { !actions.isExited(Self.helperID(of: $0)) }
                     .map { (Self.helperID(of: $0), $0) },
                 uniquingKeysWith: { first, _ in first })
             let items = byID.map { id, sample in
@@ -317,7 +276,7 @@ final class TopAppsModel {
             helpers: helpers,
             moreCount: more,
             availability: availability,
-            actionState: actionStates[group.id] ?? .rest)
+            actionState: actions.state(for: group.id))
     }
 
     /// The role and availability of a row, from its main member only. An app group with no main
@@ -327,112 +286,28 @@ final class TopAppsModel {
         let role: RowRole =
             group.appPath.map { .app(appPath: $0, main: main.identity, mainPath: main.path) }
             ?? .standalone(identity: main.identity, path: main.path)
-        return (role, availability(pid: main.identity.pid, uid: main.uid, path: main.path))
+        return (role, actions.availability(pid: main.identity.pid, uid: main.uid, path: main.path))
     }
 
-    /// Quit from the row: the route for the row's role, executed behind the guard. A refusal is a
-    /// silent no-op; the row simply leaves on the next reading (PROC-05, PROC-07).
-    func quit(_ rowID: String) {
-        guard let role = roles[rowID], let route = ActionRoutes.route(for: role, op: .quit) else { return }
-        guard coordinator.execute(route) else {
-            apply(.actionRejected, to: rowID)
-            return
-        }
-        apply(.quitSent(at: Self.now), to: rowID)
-        pollExit(of: rowID, identity: Self.identity(of: role))
-    }
+    // MARK: Actions
+
+    /// Quit from the row, behind the guard (PROC-05, PROC-07). See `ProcessActionController`.
+    func quit(_ rowID: String) { actions.quit(rowID) }
 
     /// Opens the inline Force Quit confirmation on a row, from its context menu or from the
-    /// Force Quit… offer. A row that is disabled, or has no role, opens nothing (PROC-07, D-17).
-    func requestForceQuit(_ rowID: String) {
-        guard let role = roles[rowID], availabilities[rowID] == .allowed,
-            ActionRoutes.route(for: role, op: .forceQuit) != nil
-        else { return }
-        // One confirmation at a time: opening another replaces the first (D-14).
-        for (id, state) in actionStates where state == .confirming && id != rowID {
-            apply(.confirmCancelled, to: id)
-            confirmedRoles[id] = nil
-        }
-        guard actionStates[rowID] != .confirming else { return }
-        apply(.forceQuitRequested, to: rowID)
-        // A row that is already Quitting or Force-quitting does not open a confirmation.
-        guard actionStates[rowID] == .confirming else { return }
-        confirmedRoles[rowID] = role
-        // The row leaves the confirmation by itself if its process exits meanwhile.
-        pollExit(of: rowID, identity: Self.identity(of: role))
-    }
+    /// Force Quit… offer (PROC-07, D-17).
+    func requestForceQuit(_ rowID: String) { actions.requestForceQuit(rowID) }
 
-    /// The user clicked Force Quit in the confirmation. The route is the one for the role that was
-    /// confirmed (the app's main process only, or the helper itself), executed behind the guard,
-    /// which re-reads the process first. A refusal leaves the row as it was (PROC-06, D-16).
-    func confirmForceQuit(_ rowID: String) {
-        guard actionStates[rowID] == .confirming, let role = confirmedRoles[rowID],
-            let route = ActionRoutes.route(for: role, op: .forceQuit)
-        else { return }
-        confirmedRoles[rowID] = nil
-        guard coordinator.execute(route) else {
-            apply(.actionRejected, to: rowID)
-            return
-        }
-        apply(.forceQuitSent(at: Self.now), to: rowID)
-        pollExit(of: rowID, identity: Self.identity(of: role))
-    }
+    /// The user clicked Force Quit in the confirmation (PROC-06, D-16).
+    func confirmForceQuit(_ rowID: String) { actions.confirmForceQuit(rowID) }
 
     /// Cancel in the confirmation of this row.
-    func cancelForceQuit(_ rowID: String) {
-        guard actionStates[rowID] == .confirming else { return }
-        confirmedRoles[rowID] = nil
-        apply(.confirmCancelled, to: rowID)
-    }
+    func cancelForceQuit(_ rowID: String) { actions.cancelForceQuit(rowID) }
 
     /// Esc: cancels the open confirmation and returns true, or returns false when none is open, so
     /// the next Esc closes the panel (D-14, RESEARCH Pitfall 9).
     @discardableResult
-    func cancelConfirmation() -> Bool {
-        guard let id = actionStates.first(where: { $0.value == .confirming })?.key else { return false }
-        cancelForceQuit(id)
-        return true
-    }
-
-    private static func identity(of role: RowRole) -> ProcessIdentity {
-        switch role {
-        case .app(_, let main, _): return main
-        case .helper(let identity, _), .standalone(let identity, _): return identity
-        }
-    }
-
-    /// Feeds one event to a row's state machine. A row back at rest keeps no entry.
-    private func apply(_ event: RowActionEvent, to rowID: String) {
-        let next = RowActions.reduce(actionStates[rowID] ?? .rest, event)
-        if next == .rest {
-            if actionStates[rowID] != nil { actionStates[rowID] = nil }
-        } else if actionStates[rowID] != next {
-            actionStates[rowID] = next
-        }
-    }
-
-    /// Polls whether the process is still alive every 0.5 s, only while the row is Quitting or
-    /// Force-quitting: an exit hides the row at once, the timeout returns it to normal (D-15).
-    private func pollExit(of rowID: String, identity: ProcessIdentity) {
-        pollTasks[rowID]?.cancel()
-        pollTasks[rowID] = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(500))
-                guard let self, !Task.isCancelled else { return }
-                if !self.coordinator.isAlive(identity) {
-                    self.exitedIDs.insert(rowID)
-                    self.apply(.exited, to: rowID)
-                    self.pollTasks[rowID] = nil
-                    return
-                }
-                self.apply(.tick(now: Self.now), to: rowID)
-                if !RowActions.holdsOrder(self.actionStates[rowID] ?? .rest) {
-                    self.pollTasks[rowID] = nil
-                    return
-                }
-            }
-        }
-    }
+    func cancelConfirmation() -> Bool { actions.cancelConfirmation() }
 
     private static func helperID(of sample: ProcessSample) -> String {
         ProcessNaming.helperID(of: sample)
@@ -442,9 +317,8 @@ final class TopAppsModel {
         let name = naming.helperName(of: sample, appName: appName)
         let pid = Int(sample.identity.pid)
         let id = Self.helperID(of: sample)
-        roles[id] = .helper(identity: sample.identity, path: sample.path)
-        let offered = availability(pid: sample.identity.pid, uid: sample.uid, path: sample.path)
-        availabilities[id] = offered
+        let offered = actions.availability(pid: sample.identity.pid, uid: sample.uid, path: sample.path)
+        actions.setRole(.helper(identity: sample.identity, path: sample.path), availability: offered, for: id)
         return HelperRowData(
             id: id,
             name: name,
@@ -452,6 +326,6 @@ final class TopAppsModel {
             cpuPercent: sample.cpuPercent,
             footprintBytes: sample.footprintBytes,
             availability: offered,
-            actionState: actionStates[id] ?? .rest)
+            actionState: actions.state(for: id))
     }
 }

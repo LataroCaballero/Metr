@@ -61,7 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `expand:<groupID>` (opens a Processes group) or `processes:<groupID>` (the panel's "and N more…"
     /// link: opens the window on Processes with that group in view), `search:<text>` (types into the
     /// Processes search), `select:<groupID>`, `deselect` and `hover:<0|1>` (the pointer over the
-    /// table). Release has no script and no environment name.
+    /// table), and `quit:<pid>` (Quit on the app or standalone row of that pid, through the shared action
+    /// controller; only for a process the run's author spawned). Release has no script and no environment name.
     private func runWindowScriptIfRequested() {
         #if DEBUG
         for (step, seconds) in DebugHooks.windowScript {
@@ -88,6 +89,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.windowModel.processTable?.clearSelection()
                     } else if step.hasPrefix("hover:") {
                         self.windowModel.processTable?.scriptPointer(step == "hover:1")
+                    } else if step.hasPrefix("quit:") {
+                        // Quit on the row of a process the script's author spawned, by pid.
+                        let pid = Int32(step.dropFirst("quit:".count)) ?? 0
+                        let matched = pid > 1 && (self.windowModel.processTable?.scriptQuit(pid: pid) ?? false)
+                        DebugHooks.log("window script quit matched=\(matched ? 1 : 0)")
                     } else if step.hasPrefix("processes:") {
                         self.showWindow(.processes(focusGroup: String(step.dropFirst("processes:".count))))
                     } else if let section = WindowSection(rawValue: step) {

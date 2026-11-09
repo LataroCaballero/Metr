@@ -121,6 +121,18 @@
         }
       }
     },
+    "Quit or force quit the selected process": {
+      "comment": "Help and VoiceOver label of the Processes toolbar menu (the circled x): quits or force quits the selected row",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salir o forzar la salida del proceso seleccionado"
+          }
+        }
+      }
+    },
     "Quit %@": {
       "comment": "Hover button help and VoiceOver label on a Top Apps row: quits that app, e.g. Quit Calculator",
       "extractionState": "manual",
