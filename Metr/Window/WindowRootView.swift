@@ -103,56 +103,79 @@ struct WindowSidebar: View {
         .listStyle(.sidebar)
     }
 
-    /// The quiet trailing value of a row (D-04). nil draws nothing: an unreadable metric hides only
-    /// its own value, and a failed read is never shown as a number.
-    private func sidebarValue(for section: WindowSection) -> String? {
+    /// The quiet trailing value of a row (D-04) and what VoiceOver says for it. nil draws and says
+    /// nothing: an unreadable metric hides only its own value, and a failed read is never shown as a
+    /// number. Pending shows a dash and says only the title.
+    private func sidebarValue(for section: WindowSection) -> SidebarValue {
         switch section {
         case .cpu:
             switch store.cpu {
-            case .value(let reading): return text.percent(reading.total)
-            case .pending: return "—"
-            case .unavailable: return nil
+            case .value(let reading):
+                let percent = text.percent(reading.total)
+                return SidebarValue(text: percent, spoken: String(localized: "CPU \(percent)"))
+            case .pending: return SidebarValue(text: "—", spoken: nil)
+            case .unavailable: return SidebarValue(text: nil, spoken: nil)
             }
         case .memory:
-            guard let memory = store.memory.value else { return nil }
-            switch memory.pressure {
-            case .normal: return String(localized: "Normal")
-            case .warn: return String(localized: "Elevated")
-            case .critical: return String(localized: "Critical")
-            }
+            guard let memory = store.memory.value else { return SidebarValue(text: nil, spoken: nil) }
+            let word =
+                switch memory.pressure {
+                case .normal: String(localized: "Normal")
+                case .warn: String(localized: "Elevated")
+                case .critical: String(localized: "Critical")
+                }
+            return SidebarValue(text: word, spoken: String(localized: "Memory \(word)"))
         case .disk:
-            guard let disk = store.disk.value else { return nil }
-            return String(localized: "\(text.diskBytes(disk.availableBytes)) free")
+            guard let disk = store.disk.value else { return SidebarValue(text: nil, spoken: nil) }
+            let free = text.diskBytes(disk.availableBytes)
+            return SidebarValue(
+                text: String(localized: "\(free) free"), spoken: String(localized: "Disk, \(free) free"))
         case .gpu:
             // Nothing while pending or unreadable: never a fake 0 (D-04, D-20).
-            guard let gpu = store.gpu.value else { return nil }
-            return text.percent(gpu.utilization)
+            guard let gpu = store.gpu.value else { return SidebarValue(text: nil, spoken: nil) }
+            let percent = text.percent(gpu.utilization)
+            return SidebarValue(text: percent, spoken: String(localized: "GPU \(percent)"))
         case .network:
             // The download rate alone (D-04), in the system's units. "—" until the second sample;
-            // nothing when the counters cannot be read: never a fake 0.
+            // nothing when the counters cannot be read: never a fake 0. The arrow is for the eye only.
             switch store.network {
-            case .value(let reading): return "\u{2193}" + text.rate(reading.downBytesPerSec)
-            case .pending: return "—"
-            case .unavailable: return nil
+            case .value(let reading):
+                let rate = text.rate(reading.downBytesPerSec)
+                return SidebarValue(
+                    text: "\u{2193}" + rate, spoken: String(localized: "Network, download \(rate)"))
+            case .pending: return SidebarValue(text: "—", spoken: nil)
+            case .unavailable: return SidebarValue(text: nil, spoken: nil)
             }
         case .processes:
             // Processes never has a sidebar value.
-            return nil
+            return SidebarValue(text: nil, spoken: nil)
         }
     }
 }
 
-/// One sidebar row: symbol, label, flexible space, then the quiet value.
+/// What a sidebar row shows at its trailing edge and what VoiceOver says for the whole row. A nil
+/// `spoken` leaves the title alone ("Network").
+private struct SidebarValue {
+    let text: String?
+    let spoken: String?
+}
+
+/// One sidebar row: symbol, label, flexible space, then the quiet value. For VoiceOver it is one
+/// element: the title and the value spoken as a phrase ("Network, download 2.1 megabytes per second"),
+/// without the arrow that is only for the eye.
 private struct SidebarRow: View {
     let section: WindowSection
-    let value: String?
+    let value: SidebarValue
+
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+    @Environment(\.accessibilitySwitchControlEnabled) private var switchControl
 
     var body: some View {
-        HStack(spacing: 8) {
+        let row = HStack(spacing: 8) {
             Label(section.title, systemImage: section.symbol)
             Spacer(minLength: 4)
-            if let value {
-                Text(verbatim: value)
+            if let text = value.text {
+                Text(verbatim: text)
                     .font(.subheadline)
                     .foregroundStyle(Color.secondary)
                     .monospacedDigit()
@@ -160,6 +183,14 @@ private struct SidebarRow: View {
                     .minimumScaleFactor(0.85)
             }
         }
-        .accessibilityElement(children: .combine)
+        // The explicit phrase exists only while VoiceOver or Switch Control runs (the rule of the
+        // core and volume rows); otherwise the system's own combination of the row's texts stands.
+        if voiceOver || switchControl {
+            row
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(value.spoken ?? section.title)
+        } else {
+            row.accessibilityElement(children: .combine)
+        }
     }
 }

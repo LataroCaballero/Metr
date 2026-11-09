@@ -1842,6 +1842,66 @@
           }
         }
       }
+    },
+    "Network, download %@": {
+      "comment": "VoiceOver phrase of the Network sidebar row, e.g. Network, download 2.1 megabytes per second",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Red, descarga %@"
+          }
+        }
+      }
+    },
+    "CPU %@": {
+      "comment": "VoiceOver phrase of the CPU sidebar row, e.g. CPU 12 percent",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU %@"
+          }
+        }
+      }
+    },
+    "Memory %@": {
+      "comment": "VoiceOver phrase of the Memory sidebar row, e.g. Memory Normal",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memoria %@"
+          }
+        }
+      }
+    },
+    "Disk, %@ free": {
+      "comment": "VoiceOver phrase of the Disk sidebar row, e.g. Disk, 210 GB free",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disco, %@ libres"
+          }
+        }
+      }
+    },
+    "GPU %@": {
+      "comment": "VoiceOver phrase of the GPU sidebar row, e.g. GPU 45 percent",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GPU %@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
