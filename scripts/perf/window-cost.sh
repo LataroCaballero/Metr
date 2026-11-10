@@ -40,6 +40,12 @@
 # budget.env, when a second window ever exists (count=2..9) or when the window did not open and
 # close N times.
 #
+# The cycles gate has a KNOWN FAILURE (budget.env KNOWN_ISSUE_WINDOW_CYCLES): an AppKit scroll-pocket
+# leak under fullSizeContentView, owner decision C, 2026-11-10. While growth is above the limit the
+# run still prints WINDOW-COST cycles=..., then KNOWN-FAILURE, and exits 3: it never counts as a
+# pass and the limit is not changed. A run at or under the limit prints a NOTE instead and exits 0; the
+# result sits close to the limit, so only a repeated pass on a newer macOS or SDK is evidence of a fix.
+#
 # --record writes the measured values into scripts/perf/budget.env (budget_set), only after every
 # check passed: MEASURED_WINDOW_CPU_PCT (cpu), MEASURED_WINDOW_PROCESSES_CPU_PCT (processes),
 # MEASURED_WINDOW_AFTER_CLOSE_CPU_PCT (after-close), MEASURED_WINDOW_CYCLES_GROWTH_MB (cycles) and
@@ -61,6 +67,9 @@ source scripts/perf/lib.sh
 # shellcheck source=budget.env
 source scripts/perf/budget.env
 
+# WINDOW_COST_APP measures another build of the app than the Debug one, e.g. an optimized build with
+# the DEBUG hooks compiled in (the real Release build has no window script and cannot be driven).
+METR_APP_DEBUG="${WINDOW_COST_APP:-$METR_APP_DEBUG}"
 BUDGET_FILE="$METR_ROOT/scripts/perf/budget.env"
 usage_text="usage: window-cost.sh SECTION|after-close|cycles [SECONDS|N] [--record]  (SECTION: cpu memory disk network gpu processes)"
 
@@ -291,7 +300,16 @@ run_cycles() {
   fi
 
   echo "WINDOW-COST cycles=$n growth_mb=$growth first_open_mb=$first_open"
-  [ "$(metr_gt "$growth" "$limit")" = "0" ] || fail "FAIL: memory grew by $growth MB over the $((n - 1)) cycles after the first, above $limit MB"
+  if [ "$(metr_gt "$growth" "$limit")" = "1" ]; then
+    echo "FAIL: memory grew by $growth MB over the $((n - 1)) cycles after the first, above $limit MB"
+    if [ -n "${KNOWN_ISSUE_WINDOW_CYCLES:-}" ]; then
+      echo "KNOWN-FAILURE cycles: $KNOWN_ISSUE_WINDOW_CYCLES"
+      metr_kill
+      exit 3
+    fi
+    exit 1
+  fi
+  [ -z "${KNOWN_ISSUE_WINDOW_CYCLES:-}" ] || echo "NOTE: cycles passed this run, but KNOWN_ISSUE_WINDOW_CYCLES is still set in budget.env; the result sits near the limit and a pass is only evidence once it repeats on a newer macOS or SDK (retire the known issue with the owner)"
   record MEASURED_WINDOW_CYCLES_GROWTH_MB "$growth"
   metr_kill
 }
