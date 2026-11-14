@@ -32,6 +32,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         #endif
+        // D-13: before the status item and the welcome window, so the two never stack. A move that
+        // relaunches from /Applications ends this launch.
+        if MoveToApplications.checkAtLaunch(preferences: preferences) { return }
         let store = MetricsStore()
         self.store = store
         let sampler = MetricsSampler(cadenceScale: DebugHooks.cadenceScale)
@@ -78,12 +81,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The preferences store: `.standard`, except that a scripted DEBUG run uses a throwaway suite,
     /// cleared at launch (a SIGTERM skips app cleanup, so the verification script deletes it too).
+    /// A scripted move run (a move hook is set) also uses the suite but is not cleared at launch, so
+    /// its Not Now record survives to the next launch; its script clears and deletes the suite.
     private static func makePreferences() -> UserDefaults {
         #if DEBUG
-        if DebugHooks.windowScriptActive {
+        if DebugHooks.windowScriptActive || MoveToApplications.scriptedRun {
             let name = "io.github.latarocaballero.Metr.script"
             if let suite = UserDefaults(suiteName: name) {
-                suite.removePersistentDomain(forName: name)
+                if DebugHooks.windowScriptActive { suite.removePersistentDomain(forName: name) }
                 return suite
             }
         }
