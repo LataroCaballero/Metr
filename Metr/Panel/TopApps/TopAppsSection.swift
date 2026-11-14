@@ -37,6 +37,7 @@ struct TopAppsSection: View {
         VStack(spacing: 0) {
             header
             list(display)
+            if store.processes.value?.otherUsers == .unavailable { partialNotice }
         }
         .padding(.horizontal, 8)
         // An open group that left the list closes, so it cannot reopen by surprise (D-08).
@@ -69,6 +70,22 @@ struct TopAppsSection: View {
         .padding(.horizontal, 8)
         .padding(.top, 8)
         .padding(.bottom, 4)
+    }
+
+    /// The partial state (E5): the other-users half of the process list cannot be read. One 20 pt line
+    /// at the foot of the list, aligned to the name column like "and N more…"; shown only while the read
+    /// fails, never per process, and never abbreviated.
+    private var partialNotice: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: 44)
+            Text("System processes not shown.")
+                .font(.subheadline)
+                .foregroundStyle(Color.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 20)
     }
 
     @ViewBuilder

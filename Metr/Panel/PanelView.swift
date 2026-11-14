@@ -36,12 +36,6 @@ struct PanelView: View {
     /// preset one to draw every row state.
     var topApps: TopAppsModel?
 
-    /// True while the other-users half of the process list cannot be read (E5 partial): the panel
-    /// says so instead of silently showing an incomplete list. Clears on the next successful read.
-    private var systemProcessesMissing: Bool {
-        store.processes.value?.otherUsers == .unavailable
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             RingsSection(store: store)
@@ -64,17 +58,7 @@ struct PanelView: View {
                 .help("Settings…")
                 .accessibilityLabel("Settings")
                 .keyboardShortcut(",", modifiers: .command)
-                if systemProcessesMissing {
-                    Text("System processes not shown.")
-                        .font(.subheadline)
-                        .foregroundStyle(Color.secondary)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.85)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    Spacer(minLength: 8)
-                }
+                Spacer(minLength: 8)
                 #if DEBUG
                 if DebugHooks.shellSpikeEnabled {
                     Button {

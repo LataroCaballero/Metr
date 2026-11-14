@@ -12,8 +12,11 @@
 # window does not draw off screen), so their floor is the minimum window 900 x 520 minus the 220 pt
 # sidebar. The 700 pt ceiling below applies to panel-*.png only.
 # Height gate (UI-SPEC "Height budget"): every panel PNG is at most 700 pt tall (pixelHeight / 2, the
-# renderer draws at scale 2), and the collapsed Top Apps list (panel-*-apps-{light,dark}.png) is at most
-# 583 pt: the 559 pt budget plus the 24 pt margin past which a taller list is a layout bug.
+# renderer draws at scale 2), except panel-*-apps-partial-confirm-*.png (the partial notice, a group open
+# and a Force Quit confirmation) which may reach 720 pt. The collapsed Top Apps list
+# (panel-*-apps-{light,dark}.png and panel-*-apps-partial-{light,dark}.png, the latter with its 20 pt
+# notice, 579 pt expected) is at most 583 pt: the budget plus the margin past which a taller list is a
+# layout bug.
 # Prints "RENDER-SNAPSHOTS OK dir=<path> panel=<n> welcome=<m> window=<w> window_min=<k> max_height=<pt>".
 set -euo pipefail
 
@@ -87,6 +90,7 @@ done
 
 # Height ceiling. `sips` reports pixels; the images are drawn at scale 2.
 CEILING=700
+CONFIRM_CEILING=720
 COLLAPSED_BUDGET=583
 max_height=0
 for f in "$DIR"/panel-*.png; do
@@ -94,12 +98,16 @@ for f in "$DIR"/panel-*.png; do
   [ -n "$px" ] || { echo "FAIL: could not read pixelHeight of $f" >&2; exit 1; }
   pt=$(( (px + 1) / 2 ))
   [ "$pt" -le "$max_height" ] || max_height="$pt"
-  if [ "$pt" -gt "$CEILING" ]; then
-    echo "FAIL: $(basename "$f") is $pt pt, over the $CEILING pt ceiling" >&2
+  limit="$CEILING"
+  case "$(basename "$f")" in
+    panel-*-apps-partial-confirm-*.png) limit="$CONFIRM_CEILING" ;;
+  esac
+  if [ "$pt" -gt "$limit" ]; then
+    echo "FAIL: $(basename "$f") is $pt pt, over the $limit pt ceiling" >&2
     exit 1
   fi
   case "$(basename "$f")" in
-    panel-*-apps-light.png|panel-*-apps-dark.png)
+    panel-*-apps-light.png|panel-*-apps-dark.png|panel-*-apps-partial-light.png|panel-*-apps-partial-dark.png)
       if [ "$pt" -gt "$COLLAPSED_BUDGET" ]; then
         echo "FAIL: $(basename "$f") is $pt pt, over the $COLLAPSED_BUDGET pt collapsed-list budget" >&2
         exit 1

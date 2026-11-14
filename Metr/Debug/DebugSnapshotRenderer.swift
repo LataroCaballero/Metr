@@ -150,6 +150,10 @@ enum DebugSnapshotRenderer {
             Fixture(
                 name: "apps-confirm", batch: appsBatch(processes: appsTextEditSnapshot),
                 expanded: chromeID, actionStates: [textEditID: .confirming]),
+            // The tallest panel: the partial notice, Chrome open and the Force Quit confirmation (S4 overflow).
+            Fixture(
+                name: "apps-partial-confirm", batch: appsBatch(processes: appsPartialTextEditSnapshot),
+                expanded: chromeID, actionStates: [textEditID: .confirming]),
             // TextEdit is quitting and Safari did not quit, so it offers Force Quit… (D-15).
             Fixture(
                 name: "apps-quitting", batch: appsBatch(processes: appsTextEditSnapshot),
@@ -227,6 +231,13 @@ enum DebugSnapshotRenderer {
     /// `apps-partial`: the `apps` rows with the other-users half unavailable.
     private static var appsPartialSnapshot: ProcessSnapshot {
         var snapshot = appsSnapshot
+        snapshot.otherUsers = .unavailable
+        return snapshot
+    }
+
+    /// `apps-partial-confirm`: the TextEdit rows with the other-users half unavailable.
+    private static var appsPartialTextEditSnapshot: ProcessSnapshot {
+        var snapshot = appsTextEditSnapshot
         snapshot.otherUsers = .unavailable
         return snapshot
     }
