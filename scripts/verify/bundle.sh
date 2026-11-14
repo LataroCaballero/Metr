@@ -49,4 +49,18 @@ debug_prefix="METR_""DEBUG"
 hits="$(strings -a "$BIN" | grep -c "$debug_prefix" || true)"
 [ "$hits" = "0" ] || fail "Release binary contains $hits occurrence(s) of the DEBUG hook prefix"
 
+# Icon gate (DSGN-02): the layered AppIcon must be compiled into the bundle.
+[ "$(plutil -extract CFBundleIconName raw -o - "$PLIST" 2>/dev/null || true)" = "AppIcon" ] \
+  || fail "CFBundleIconName is not AppIcon"
+[ -s "$APP/Contents/Resources/AppIcon.icns" ] || fail "Contents/Resources/AppIcon.icns is missing or empty"
+# Capture first: a pipe closing early would SIGPIPE assetutil under pipefail.
+car_info="$(assetutil --info "$APP/Contents/Resources/Assets.car" 2>/dev/null || true)"
+[ -n "$car_info" ] || fail "assetutil could not read Contents/Resources/Assets.car"
+printf '%s' "$car_info" | python3 -I -c '
+import json, sys
+entries = json.load(sys.stdin)
+ok = any(e.get("AssetType") == "IconImageStack" and e.get("Name") == "AppIcon" for e in entries if isinstance(e, dict))
+sys.exit(0 if ok else 1)
+' || fail "Assets.car has no IconImageStack named AppIcon"
+
 echo "BUNDLE OK"
