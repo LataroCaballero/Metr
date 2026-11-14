@@ -13,12 +13,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private static let contentWidth: CGFloat = 480
 
     private let preferences: UserDefaults
-    /// Whether the main window is open. Task 1 only: the policy rule moves to `WindowPresence` next.
-    private let isMainWindowOpen: () -> Bool
+    private let presence: WindowPresence
 
-    init(preferences: UserDefaults, isMainWindowOpen: @escaping () -> Bool) {
+    init(preferences: UserDefaults, presence: WindowPresence) {
         self.preferences = preferences
-        self.isMainWindowOpen = isMainWindowOpen
+        self.presence = presence
         // Not resizable and no zoom (UI-SPEC: the Form has a fixed width and its own height).
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 160),
@@ -52,7 +51,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             window.setContentSize(NSSize(width: Self.contentWidth, height: height))
             window.center()
         }
-        NSApp.setActivationPolicy(.regular)
+        presence.opened(.settings)
         NSApp.activate()
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
@@ -69,15 +68,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         // A hosting controller left on a closed window keeps its SwiftUI content alive (FND-03).
         window?.contentViewController = nil
-        // On the next turn, so the window finishes closing as a regular app's window. The main window
-        // keeps the Dock icon and the main menu while it is open.
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                if !self.isMainWindowOpen() { NSApp.setActivationPolicy(.accessory) }
-                DebugHooks.log("settings closed policy=\(Self.policyName)")
+        presence.closed(.settings)
+        #if DEBUG
+        // The presence coordinator applies the policy on the next turn; log on the turn after that.
+        DispatchQueue.main.async {
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    DebugHooks.log("settings closed policy=\(Self.policyName)")
+                }
             }
         }
+        #endif
     }
 
     // MARK: DEBUG logging

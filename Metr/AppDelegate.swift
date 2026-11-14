@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let windowModel = WindowModel()
     /// Created on the first open and kept (the window object is reused; its content is not).
     private var windowController: WindowController?
+    /// The one coordinator of the Dock icon and the main menu: they show while any Metr window is open.
+    let windowPresence = WindowPresence()
     /// The preferences the Settings window writes and the lifecycle monitor reads (D-05). A scripted
     /// DEBUG run uses its own suite, so scripted verification never writes the owner's domain.
     let preferences: UserDefaults = AppDelegate.makePreferences()
@@ -55,7 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showWindow(_ route: WindowRoute) {
         guard let store, let sampler else { return }
         let controller = windowController ?? WindowController(
-            store: store, sampler: sampler, model: windowModel,
+            store: store, sampler: sampler, model: windowModel, presence: windowPresence,
             closePanel: { [weak self] in self?.statusItemController?.closePanel() })
         windowController = controller
         controller.show(route)
@@ -66,7 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showSettings() {
         statusItemController?.closePanel()
         let controller = settingsController ?? SettingsWindowController(
-            preferences: preferences, isMainWindowOpen: { [weak self] in self?.windowModel.isOpen ?? false })
+            preferences: preferences, presence: windowPresence)
         settingsController = controller
         controller.show()
     }
@@ -171,7 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// preferences domain, and the flag is written at claim time so a crash cannot repeat it.
     private func presentWelcomeIfFirstLaunch() {
         guard FirstRunGate().claimWelcomePresentation() else { return }
-        let controller = WelcomeWindowController()
+        let controller = WelcomeWindowController(presence: windowPresence)
         welcomeController = controller
         controller.present()
     }

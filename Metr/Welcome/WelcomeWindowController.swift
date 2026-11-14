@@ -4,8 +4,11 @@ import SwiftUI
 /// The first-launch welcome window (D-14): small, centered, close button only, not resizable and
 /// not modal, so the status item and the panel keep working while it is open.
 @MainActor
-final class WelcomeWindowController: NSWindowController {
-    init() {
+final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
+    private let presence: WindowPresence
+
+    init(presence: WindowPresence) {
+        self.presence = presence
         let window = WelcomeWindow(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 360),
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -17,6 +20,7 @@ final class WelcomeWindowController: NSWindowController {
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
         super.init(window: window)
+        window.delegate = self
 
         let host = NSHostingController(rootView: WelcomeView(onDone: { [weak self] in self?.close() }))
         host.sizingOptions = .preferredContentSize
@@ -28,11 +32,17 @@ final class WelcomeWindowController: NSWindowController {
 
     /// Brings the window in front of other apps (Metr is an accessory app) and centers it.
     func present() {
+        presence.opened(.welcome)
         NSApp.activate()
         window?.center()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         DebugHooks.log("welcome shown")
+    }
+
+    /// The Done button, Esc and the close button all close through this window.
+    func windowWillClose(_ notification: Notification) {
+        presence.closed(.welcome)
     }
 }
 

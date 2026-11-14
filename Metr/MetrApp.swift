@@ -6,12 +6,14 @@ struct MetrApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        // The status item, the panel and the window are owned by AppDelegate (the window is AppKit
-        // hosted, see WindowController). The only scene is the Settings placeholder, and its
-        // menu item is removed below until Phase 4 gives it content.
+        // The status item, the panel and the windows are owned by AppDelegate (they are AppKit hosted,
+        // see WindowController and SettingsWindowController, D-25). The only scene is the required empty
+        // one: it is never shown, and the real Settings item is the command below.
         Settings { EmptyView() }
             .commands {
-                MetrCommands(model: appDelegate.windowModel, open: { appDelegate.showWindow($0) })
+                MetrCommands(
+                    model: appDelegate.windowModel, open: { appDelegate.showWindow($0) },
+                    showSettings: { appDelegate.showSettings() })
             }
     }
 }
@@ -21,10 +23,15 @@ struct MetrApp: App {
 struct MetrCommands: Commands {
     let model: WindowModel
     let open: (WindowRoute) -> Void
+    let showSettings: () -> Void
 
     var body: some Commands {
-        // No Settings... item until Phase 4, so Cmd-, cannot open an empty window (RESEARCH Pitfall 3).
-        CommandGroup(replacing: .appSettings) {}
+        // Metr > Settings… (Cmd-,). Replaces the system item, which would open the empty scene above
+        // (RESEARCH Pitfall 3); same title, shortcut and position.
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { showSettings() }
+                .keyboardShortcut(",")
+        }
 
         // File > Close (Cmd-W): the system closes the key window, which is the Metr window.
         CommandGroup(after: .newItem) {

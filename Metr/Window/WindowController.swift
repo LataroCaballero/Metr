@@ -21,6 +21,7 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     private let sampler: MetricsSampler
     private let model: WindowModel
     private let closePanel: () -> Void
+    private let presence: WindowPresence
     /// True from the first `show` until the window closes. The demand follows this, not
     /// `model.isOpen`, because the demand must be in place before the panel closes.
     private var isShown = false
@@ -32,8 +33,12 @@ final class WindowController: NSWindowController, NSWindowDelegate {
     private weak var observedHost: NSHostingController<WindowRootView>?
     #endif
 
-    init(store: MetricsStore, sampler: MetricsSampler, model: WindowModel, closePanel: @escaping () -> Void) {
+    init(
+        store: MetricsStore, sampler: MetricsSampler, model: WindowModel, presence: WindowPresence,
+        closePanel: @escaping () -> Void
+    ) {
         self.store = store
+        self.presence = presence
         self.sampler = sampler
         self.model = model
         self.closePanel = closePanel
@@ -63,7 +68,7 @@ final class WindowController: NSWindowController, NSWindowDelegate {
 
         let window = existingOrNewWindow()
         if !model.isOpen {
-            NSApp.setActivationPolicy(.regular)
+            presence.opened(.main)
             let frame = window.frame
             let host = NSHostingController(rootView: WindowRootView(store: store, model: model))
             // The window is resizable and owns its size; the content never resizes it.
@@ -171,16 +176,20 @@ final class WindowController: NSWindowController, NSWindowDelegate {
         // A hosting controller left on a closed window keeps observing the store (FND-03).
         window?.contentViewController = nil
         model.setOpen(false)
-        // On the next turn, so the window finishes closing as a regular app's window. A reopen in
-        // between keeps the regular policy.
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, !self.model.isOpen else { return }
-                NSApp.setActivationPolicy(.accessory)
-                DebugHooks.log("window closed policy=accessory")
-                #if DEBUG
-                DebugHooks.log("window content released=\(self.observedHost == nil ? 1 : 0)")
-                #endif
+        // The coordinator returns Metr to accessory only when this was the last Metr window, on the
+        // next turn. The log line follows one turn later and reads the real policy; its accessory
+        // form is the literal window-cost.sh greps. A reopen in between logs nothing.
+        presence.closed(.main)
+        DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, !self.model.isOpen else { return }
+                    let policy = NSApp.activationPolicy() == .regular ? "regular" : "accessory"
+                    DebugHooks.log("window closed policy=\(policy)")
+                    #if DEBUG
+                    DebugHooks.log("window content released=\(self.observedHost == nil ? 1 : 0)")
+                    #endif
+                }
             }
         }
     }
@@ -217,8 +226,8 @@ final class WindowController: NSWindowController, NSWindowDelegate {
 
     #if DEBUG
     /// Counts the Command-key items of the main menu, recursively: Settings (","), Close ("w"),
-    /// Window > Metr ("0") and the six View sections ("1" to "6"). Exactly one Close and one Metr
-    /// must exist, and no Settings (RESEARCH Pitfall 3, assumption A3).
+    /// Window > Metr ("0") and the six View sections ("1" to "6"). Exactly one Close, one Metr and one
+    /// Settings (the app menu's Metr > Settings…, Phase 4 D-01) must exist (RESEARCH Pitfall 3, assumption A3).
     private func logMenuProbe() {
         var settings = 0, close = 0, metr = 0, sections = 0
         func walk(_ menu: NSMenu) {
