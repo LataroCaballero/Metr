@@ -208,7 +208,9 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
         let escape = PanelEscapeRouter()
         let open: (WindowRoute) -> Void = { [weak self] route in self?.openWindow?(route) }
         let hosting = PanelHostingController(
-            rootView: PanelView(store: store, onClose: close, onOpenWindow: open, escape: escape))
+            rootView: PanelView(
+                store: store, onClose: close, onOpenWindow: open,
+                onOpenSettings: { [weak self] in self?.openSettings?() }, escape: escape))
         hosting.sizingOptions = .preferredContentSize
         // Esc reaches the panel by two paths: the responder chain (cancelOperation) and the
         // SwiftUI exit command inside the view. Both cancel an open confirmation first and close
@@ -245,6 +247,32 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
         button.performClick(nil)
     }
 
+    #if DEBUG
+    // MARK: Scripted DEBUG entry points (METR_DEBUG_WINDOW_SCRIPT steps `panel`, `gear`, `menu`)
+
+    /// Opens the panel the way a click on the rings does.
+    func openPanelForScript() {
+        guard !popover.isShown, !pendingOpen else { return }
+        openPanel()
+    }
+
+    /// Presses the panel gear: the closure the gear is bound to.
+    func pressGearForScript() {
+        openSettings?()
+    }
+
+    /// Opens the real right-click menu through the private `showMenu()` a right click takes. Menu
+    /// tracking blocks the main run loop, so a one-shot timer in the `.common` modes cancels the
+    /// tracking after 4 s, which lets a capture script photograph the open menu and the run go on.
+    func showMenuForScript() {
+        let timer = Timer(timeInterval: 4, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.statusItem.menu?.cancelTracking() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        showMenu()
+    }
+    #endif
+
     // MARK: RightClickMenuActions
 
     @objc func showAbout(_ sender: Any?) {
@@ -261,7 +289,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
 
     // MARK: NSMenuDelegate
 
+    func menuWillOpen(_ menu: NSMenu) {
+        DebugHooks.log("menu shown items=\(menu.items.filter { !$0.isSeparatorItem }.count)")
+    }
+
     func menuDidClose(_ menu: NSMenu) {
+        DebugHooks.log("menu closed")
         // Clear on the next turn: the chosen item's action is delivered after this callback.
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated { self?.statusItem.menu = nil }

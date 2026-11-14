@@ -26,6 +26,9 @@ struct PanelView: View {
     /// Opens the Metr window (PANEL-06, D-01). The footer button, Cmd-0 and, later, the "and N more…"
     /// link all call it; the default keeps `PanelView(store:)` compiling for the debug renderer.
     var onOpenWindow: (WindowRoute) -> Void = { _ in }
+    /// Opens the Settings window (D-01's fourth way in). The footer gear and Cmd-, call it; the app
+    /// closes the panel first. The default keeps `PanelView(store:)` compiling for the debug renderer.
+    var onOpenSettings: () -> Void = {}
     /// Esc priority: an open confirmation is cancelled before the panel closes. A fresh router by
     /// default, so `PanelView(store:)` keeps compiling.
     var escape = PanelEscapeRouter()
@@ -48,9 +51,19 @@ struct PanelView: View {
             Divider()
             TopAppsSection(store: store, escape: escape, model: topApps)
             Divider()
-            // Fixed 28 pt row (footer 60 pt with its padding): the partial-state line wraps to at
-            // most two lines beside the two small buttons and never resizes the panel.
+            // Fixed 28 pt row (footer 60 pt with its padding): the gear leads, a flexible space of at
+            // least 8 pt keeps it 24 pt or more from Open Metr, then the two text buttons. The partial
+            // notice lives at the foot of Top Apps, so nothing here can truncate in EN or ES.
             HStack(spacing: 8) {
+                Button { onOpenSettings() } label: {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .imageScale(.medium)
+                .help("Settings…")
+                .accessibilityLabel("Settings")
+                .keyboardShortcut(",", modifiers: .command)
                 if systemProcessesMissing {
                     Text("System processes not shown.")
                         .font(.subheadline)
@@ -60,7 +73,7 @@ struct PanelView: View {
                         .minimumScaleFactor(0.85)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    Spacer(minLength: 0)
+                    Spacer(minLength: 8)
                 }
                 #if DEBUG
                 if DebugHooks.shellSpikeEnabled {

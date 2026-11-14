@@ -97,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// table), and `quit:<pid>` (Quit on the app or standalone row of that pid, through the shared action
     /// controller; only for a process the run's author spawned) and `forcequit-dryrun:<groupID>` (logs how the
     /// Force Quit alert's buttons are configured; the alert is never shown), `settings` (the right-click
-    /// item's path), `settings-close` and `speed:<normal|energySaver>` (writes the Refresh speed into the
+    /// item's path), `panel`, `gear` (the panel footer gear) and `menu` (opens the real right-click menu, cancelled after 4 s), `settings-close` and `speed:<normal|energySaver>` (writes the Refresh speed into the
     /// store the pop-up writes). Release has no script and no environment name.
     private func runWindowScriptIfRequested() {
         #if DEBUG
@@ -111,6 +111,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.windowController?.closeWindow()
                     } else if step == "settings" {
                         self.statusItemController?.openSettings(nil)
+                    } else if step == "panel" {
+                        self.statusItemController?.openPanelForScript()
+                    } else if step == "gear" {
+                        self.statusItemController?.pressGearForScript()
+                    } else if step == "menu" {
+                        self.statusItemController?.showMenuForScript()
                     } else if step == "settings-close" {
                         self.settingsController?.closeWindow()
                     } else if step.hasPrefix("speed:") {
