@@ -504,7 +504,7 @@ enum DebugSnapshotRenderer {
             WindowFixture(
                 name: "processes-didnotquit", section: .processes, populated: false, contentSize: standard,
                 processes: .live, actionStates: [mailID: .didNotQuit]),
-            // The sidebar at its 200 pt minimum beside the detail at the 900 x 520 window minimum, with
+            // The sidebar at its 220 pt minimum beside the detail at the 900 x 520 window minimum, with
             // the worst-case value of every row (100 %, Critical, 128.4 MB/s, 210 GB free) (W1 overflow).
             WindowFixture(
                 name: "sidebar-min", section: .network, populated: true, contentSize: minimum, network: .wide,
@@ -793,8 +793,8 @@ enum DebugSnapshotRenderer {
     /// to get the detail column the section fixtures render in.
     private static let sidebarWidth: CGFloat = 220
 
-    /// The sidebar's minimum width (`navigationSplitViewColumnWidth(min: 200)`), for the sidebar fixture.
-    private static let sidebarMinimum: CGFloat = 200
+    /// The sidebar's minimum width (`navigationSplitViewColumnWidth(min: 220)`), for the sidebar fixture.
+    private static let sidebarMinimum: CGFloat = 220
 
     /// Logs the contrast the window views read (`metrContrast`) inside a rendered window, so a
     /// high-contrast fixture proves the increased tones reached the views that draw them.
@@ -843,7 +843,7 @@ enum DebugSnapshotRenderer {
                     detailView(for: fixture.section, store: store, table: table)
                         .frame(width: detailSize.width, height: detailSize.height))
                 if fixture.withSidebar {
-                    // The real sidebar at its 200 pt minimum next to the detail: the split view itself
+                    // The real sidebar at its 220 pt minimum next to the detail: the split view itself
                     // does not draw off screen (A7), its two columns do.
                     let model = WindowModel(persistsState: false, section: fixture.section)
                     content = AnyView(

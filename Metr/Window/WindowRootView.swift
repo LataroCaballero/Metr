@@ -38,7 +38,9 @@ struct WindowRootView: View {
     var body: some View {
         NavigationSplitView {
             WindowSidebar(store: store, model: model)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+                // 220 pt is the width the longest row needs in English ("Network" beside "↓128.4 MB/s");
+                // narrower, the label truncated (found by the L10N-01 render gate, 04-06).
+                .navigationSplitViewColumnWidth(min: 220, ideal: 220, max: 280)
         } detail: {
             detail
                 .navigationTitle(model.section.title)

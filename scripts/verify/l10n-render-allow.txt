@@ -6,3 +6,5 @@
 # number-format rules. Every entry needs a reason; the gate prints how many lines it exempted
 # (allowed=<n>) and the plan SUMMARY lists every entry.
 # Blank lines and lines starting with # are ignored.
+window-en-disk-many-*.png	Photography archive 2019 to 2026, full-resolution originals, proofs, edits an...	Deliberately 107-character volume name in the disk-many fixture; a volume name tail-truncates by design (lineLimit 1) and the full name is in the row tooltip
+window-es-disk-many-*.png	Photography archive 2019 to 2026, full-resolution originals, proofs, edits a...	Same fixture in the ES run: a user-chosen volume name is data, not catalog text, and tail-truncates by design; the recognizer cuts the line one letter earlier

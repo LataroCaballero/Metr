@@ -90,7 +90,7 @@ for lang in en es; do
     [ -n "$wpx" ] && [ -n "$hpx" ] || { echo "FAIL: could not read the size of $f" >&2; exit 1; }
     [ $(( wpx / 2 )) -eq 480 ] || { echo "FAIL: $base is $(( wpx / 2 )) pt wide, expected 480" >&2; exit 1; }
     pt=$(( (hpx + 1) / 2 ))
-    [ "$pt" -le "$SETTINGS_MAX" ] || { echo "FAIL: $base is $pt pt tall, over the $SETTINGS_MAX pt ceiling" >&2; exit 1; }
+    if [ "$pt" -gt "$SETTINGS_MAX" ]; then echo "FAIL: $base is $pt pt tall, over the $SETTINGS_MAX pt ceiling" >&2; exit 1; fi
     [ "$pt" -le "$settings_tallest" ] || settings_tallest="$pt"
     entry="$(grep -E "rendered $base " "$METR_LOGS/render-$lang.log" | tail -n 1 || true)"
     [ -n "$entry" ] || { echo "FAIL: no render log line for $base" >&2; exit 1; }
@@ -131,14 +131,20 @@ for f in "$DIR"/panel-*.png; do
   [ -n "$px" ] || { echo "FAIL: could not read pixelHeight of $f" >&2; exit 1; }
   pt=$(( (px + 1) / 2 ))
   [ "$pt" -le "$max_height" ] || max_height="$pt"
-  limit="$CEILING"
+  # Every ceiling compares with greater-than: a fixture at exactly 700, 720, 583 or 360 pt passes and one
+  # point over fails (04-06 boundary probe).
   case "$(basename "$f")" in
-    panel-*-apps-partial-confirm-*.png) limit="$CONFIRM_CEILING" ;;
+    panel-*-apps-partial-confirm-*.png)
+      if [ "$pt" -gt "$CONFIRM_CEILING" ]; then
+        echo "FAIL: $(basename "$f") is $pt pt, over the $CONFIRM_CEILING pt ceiling" >&2
+        exit 1
+      fi ;;
+    *)
+      if [ "$pt" -gt "$CEILING" ]; then
+        echo "FAIL: $(basename "$f") is $pt pt, over the $CEILING pt ceiling" >&2
+        exit 1
+      fi ;;
   esac
-  if [ "$pt" -gt "$limit" ]; then
-    echo "FAIL: $(basename "$f") is $pt pt, over the $limit pt ceiling" >&2
-    exit 1
-  fi
   case "$(basename "$f")" in
     panel-*-apps-light.png|panel-*-apps-dark.png|panel-*-apps-partial-light.png|panel-*-apps-partial-dark.png)
       if [ "$pt" -gt "$COLLAPSED_BUDGET" ]; then
