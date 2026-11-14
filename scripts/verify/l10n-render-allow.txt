@@ -1,0 +1,8 @@
+# Allowlist for scripts/verify/l10n-render.sh (04-06).
+# One entry per line, three TAB-separated fields:
+#   <file-glob>	<exact recognized text>	<reason>
+# The glob matches the PNG's file name (for example settings-*.png); the text is the exact line the
+# on-device recognizer returns for it. A matching line is exempt from the leftover, truncation and
+# number-format rules. Every entry needs a reason; the gate prints how many lines it exempted
+# (allowed=<n>) and the plan SUMMARY lists every entry.
+# Blank lines and lines starting with # are ignored.
