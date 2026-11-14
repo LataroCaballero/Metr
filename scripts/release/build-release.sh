@@ -81,6 +81,7 @@ PLIST="$STAGED/Contents/Info.plist"
 # 6. The verify chain on the staged, signed copy.
 bash scripts/verify/bundle.sh "$STAGED" >&2
 METR_APP_RELEASE="$STAGED" bash scripts/verify/l10n.sh >&2
+bash scripts/verify/no-network.sh "$STAGED" >&2
 
 sig_info="$(codesign -dvvv "$STAGED" 2>&1)"
 CDHASH="$(printf '%s\n' "$sig_info" | sed -n 's/^CDHash=//p' | head -n 1)"

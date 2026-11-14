@@ -4,7 +4,8 @@
 # (default 300) with proc_pid_rusage (scripts/perf/rusage.swift), checks that it holds no network
 # sockets, and compares the numbers with the *_MAX thresholds in scripts/perf/budget.env.
 # --record writes the measured values into budget.env (MEASURED_*), also when the gate fails.
-# Prints "NO-SOCKETS OK" and "BUDGET PASS cpu=<v> wakeups=<v> footprint=<v>", or
+# Prints "NO-SOCKETS OK", "NO-NETTOP OK" (nettop shows no data row for the process; otherwise
+# "NETTOP TRAFFIC FOUND" with exit 1) and "BUDGET PASS cpu=<v> wakeups=<v> footprint=<v>", or
 # "SOCKETS FOUND" / "BUDGET FAIL <metric>=<v> max=<v>" with exit 1.
 # Also asserts the idle app has no top child (RESEARCH Pitfall 3): prints the no-top-child line,
 # or "TOP CHILD FOUND" with exit 1.
@@ -84,6 +85,16 @@ if [ -n "$SOCKETS" ]; then
   fail "SOCKETS FOUND"
 fi
 echo "NO-SOCKETS OK"
+
+# Zero-traffic check (DIST-04): nettop prints a header and a data row only for a process that moved
+# bytes; any row beyond the header is a failure. Captured first: a closing pipe would SIGPIPE nettop.
+NETTOP_OUT="$(nettop -P -L 1 -p "$PID" 2>/dev/null || true)"
+NETTOP_ROWS="$(printf '%s\n' "$NETTOP_OUT" | sed '1d' | grep -E '[^[:space:]]' || true)"
+if [ -n "$NETTOP_ROWS" ]; then
+  printf '%s\n' "$NETTOP_ROWS"
+  fail "NETTOP TRAFFIC FOUND"
+fi
+echo "NO-NETTOP OK"
 
 [ "$(metr_gt "$CPU" "$CPU_PCT_MAX")" = "0" ] || fail "BUDGET FAIL cpu_pct=$CPU max=$CPU_PCT_MAX"
 [ "$(metr_gt "$WAKE" "$WAKEUPS_PER_SEC_MAX")" = "0" ] || fail "BUDGET FAIL wakeups_per_s=$WAKE max=$WAKEUPS_PER_SEC_MAX"
