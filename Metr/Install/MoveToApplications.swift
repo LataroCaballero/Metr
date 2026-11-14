@@ -70,6 +70,13 @@ enum MoveToApplications {
             .appending(path: bundleName, directoryHint: .isDirectory)
         #endif
 
+        // The running bundle IS the destination reached by another path (a firmlink or a symbolic link
+        // into /Applications): it is installed, and the move would trash the very copy it runs from.
+        if isSameItem(bundleURL, destination) {
+            DebugHooks.log("move-offer class=\(location.rawValue) decision=skip replace=nothing reason=already-installed")
+            return false
+        }
+
         let record = MoveOfferRecord(defaults: preferences)
         let decision = MoveOffer.decide(
             location: location, running: running, installed: installedCopy(at: destination),
@@ -85,8 +92,138 @@ enum MoveToApplications {
         #endif
 
         guard case .offer = decision else { return false }
-        // The alert and the move arrive with the next task: a decision alone moves nothing.
-        return false
+
+        let answer: Answer
+        #if DEBUG
+        // A DEBUG build never presents an alert on its own: the hook answers, or asks for the real alert.
+        switch hooks.confirm {
+        case "move": answer = .move
+        case "notnow": answer = .notNow
+        case "present": answer = presentOfferAlert()
+        case "present-failure":
+            presentFailureAlert(revealing: bundleURL)
+            return false
+        default: return false
+        }
+        #else
+        answer = presentOfferAlert()
+        #endif
+
+        switch answer {
+        case .notNow:
+            // Once per location class per app version: the next launch of this version stays quiet.
+            record.recordDecline(location, version: running.id)
+            DebugHooks.log("move declined class=\(location.rawValue)")
+            return false
+        case .move:
+            if move(from: bundleURL, to: destination, running: running) { return true }
+            DebugHooks.log("move result=failed relaunch=0")
+            #if DEBUG
+            if hooks.confirm == "present" { presentFailureAlert(revealing: bundleURL) }
+            #else
+            presentFailureAlert(revealing: bundleURL)
+            #endif
+            return false
+        }
+    }
+
+    private enum Answer { case move, notNow }
+
+    /// The offer (D-13): app icon, title and one-paragraph body, [Move to Applications] as the default
+    /// (Return) and [Not Now] with Esc set explicitly (AppKit gives Esc only to a button titled Cancel).
+    private static func presentOfferAlert() -> Answer {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = String(localized: "Move Metr to Applications?")
+        alert.informativeText = String(
+            localized: "Metr works best from your Applications folder, and Open at login needs it there.")
+        let moveButton = alert.addButton(withTitle: String(localized: "Move to Applications"))
+        moveButton.keyEquivalent = "\r"
+        let notNowButton = alert.addButton(withTitle: String(localized: "Not Now"))
+        notNowButton.keyEquivalent = "\u{1b}"
+        NSApp.activate()
+        DebugHooks.log("move alert shown kind=offer")
+        return alert.runModal() == .alertFirstButtonReturn ? .move : .notNow
+    }
+
+    /// The failure (copy, trash or relaunch threw, or the destination holds something that is not an
+    /// older Metr): one warning, [Show in Finder] as the default and [Not Now] with Esc. Metr keeps
+    /// running from where it is; there is no retry.
+    private static func presentFailureAlert(revealing bundleURL: URL) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(localized: "Metr couldn't be moved.")
+        alert.informativeText = String(
+            localized: "Drag Metr into your Applications folder yourself, then open it from there.")
+        let showButton = alert.addButton(withTitle: String(localized: "Show in Finder"))
+        showButton.keyEquivalent = "\r"
+        let notNowButton = alert.addButton(withTitle: String(localized: "Not Now"))
+        notNowButton.keyEquivalent = "\u{1b}"
+        NSApp.activate()
+        DebugHooks.log("move alert shown kind=failure")
+        if alert.runModal() == .alertFirstButtonReturn {
+            NSWorkspace.shared.activateFileViewerSelecting([bundleURL])
+        }
+    }
+
+    private struct MoveError: Error {}
+
+    /// Copies the running bundle to `destination` and relaunches from there. An older or same-version
+    /// Metr already at the destination goes to the Trash first (never deleted outright); a newer Metr,
+    /// another app or an unreadable item is left alone and the move fails. The destination is read again
+    /// right before acting, because the decision may be stale. The copy keeps every extended attribute
+    /// and the signature of the original: nothing here touches the quarantine attribute or Gatekeeper.
+    /// Returns true when the relaunch is under way and Metr is terminating.
+    private static func move(from source: URL, to destination: URL, running: BundleVersion) -> Bool {
+        let fileManager = FileManager.default
+        do {
+            let installed = installedCopy(at: destination)
+            guard MoveOffer.stillReplaceable(running: running, installed: installed) else { throw MoveError() }
+            if case .metr = installed {
+                var trashed: NSURL?
+                try fileManager.trashItem(at: destination, resultingItemURL: &trashed)
+                DebugHooks.log("move trashed=\(trashed?.path ?? "unknown")")
+            }
+            try fileManager.copyItem(at: source, to: destination)
+            try relaunch(from: destination)
+        } catch {
+            return false
+        }
+        DebugHooks.log("move result=moved relaunch=1")
+        NSApp.terminate(nil)
+        return true
+    }
+
+    /// Starts a detached shell that waits for this process to exit, then opens the new copy as a new
+    /// instance. The pid and the path are separate argv entries after a fixed script: no path text is
+    /// ever part of the script string.
+    private static func relaunch(from destination: URL) throws {
+        let script = """
+            i=0
+            while /bin/kill -0 "$1" 2>/dev/null && [ "$i" -lt 100 ]; do /bin/sleep 0.2; i=$((i + 1)); done
+            shift
+            exec /usr/bin/open -n "$@"
+            """
+        var arguments = ["-c", script, "sh", String(ProcessInfo.processInfo.processIdentifier), destination.path]
+        #if DEBUG
+        // The scripted copy must not claim the welcome window in the owner's domain.
+        arguments += ["--args", "-MetrDidPresentWelcome", "YES"]
+        #endif
+        let helper = Process()
+        helper.executableURL = URL(fileURLWithPath: "/bin/sh")
+        helper.arguments = arguments
+        helper.standardInput = FileHandle.nullDevice
+        helper.standardOutput = FileHandle.nullDevice
+        helper.standardError = FileHandle.nullDevice
+        try helper.run()
+    }
+
+    /// True when both URLs name the same file-system item, whatever path reaches it.
+    private static func isSameItem(_ first: URL, _ second: URL) -> Bool {
+        guard let a = try? first.resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier,
+            let b = try? second.resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier
+        else { return false }
+        return a.isEqual(b)
     }
 
     /// What sits at `url` right now: nothing, a Metr bundle (with its version), or anything else.

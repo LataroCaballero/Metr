@@ -2022,6 +2022,90 @@
           }
         }
       }
+    },
+    "Move Metr to Applications?": {
+      "comment": "Title of the alert offered when Metr runs from a disk image or outside Applications",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Mover Metr a Aplicaciones?"
+          }
+        }
+      }
+    },
+    "Metr works best from your Applications folder, and Open at login needs it there.": {
+      "comment": "Body of the Move to Applications alert",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metr funciona mejor desde la carpeta Aplicaciones, y «Abrir al iniciar sesión» necesita estar allí."
+          }
+        }
+      }
+    },
+    "Move to Applications": {
+      "comment": "Default button of the Move to Applications alert",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mover a Aplicaciones"
+          }
+        }
+      }
+    },
+    "Not Now": {
+      "comment": "Dismiss button of the Move to Applications alert and of its failure alert",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ahora no"
+          }
+        }
+      }
+    },
+    "Metr couldn't be moved.": {
+      "comment": "Title of the alert shown when the move to Applications failed",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se ha podido mover Metr."
+          }
+        }
+      }
+    },
+    "Drag Metr into your Applications folder yourself, then open it from there.": {
+      "comment": "Body of the failure alert of the Move to Applications offer",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrastra Metr a la carpeta Aplicaciones y ábrelo desde allí."
+          }
+        }
+      }
+    },
+    "Show in Finder": {
+      "comment": "Default button of the failure alert: reveals the running Metr in Finder",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar en el Finder"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
