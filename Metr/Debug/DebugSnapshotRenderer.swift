@@ -343,8 +343,10 @@ enum DebugSnapshotRenderer {
         // render asynchronously; the totals line and the exit come after the last one.
         Task { @MainActor in
             let windowCount = await renderWindows(to: directory, language: language)
+            let settingsCount = await renderSettings(to: directory, language: language)
             // The render gate compares this line with the PNGs on disk, so it measures what was written.
-            DebugHooks.log("rendered-total panel=\(panelCount) welcome=\(welcomeCount) window=\(windowCount)")
+            DebugHooks.log(
+                "rendered-total panel=\(panelCount) welcome=\(welcomeCount) window=\(windowCount) settings=\(settingsCount)")
             NSApp.terminate(nil)
         }
     }
@@ -888,6 +890,88 @@ enum DebugSnapshotRenderer {
                 window.close()
                 DebugChartHover.preset = nil
                 DebugContrast.forced = nil
+            }
+        }
+        return count
+    }
+
+    // MARK: Settings fixtures
+
+    /// A stand-in for the live login item, so no fixture ever touches `SMAppService`.
+    private struct FixtureLoginItemService: LoginItemService {
+        let rawStatus: Int
+        var runsFromApplications = true
+        func register() throws {}
+        func unregister() throws {}
+        func openLoginItemsSettings() {}
+    }
+
+    /// The six Settings states (UI-SPEC "Open at login" table plus the D-13 location state). `failure`
+    /// is the system holding `.notFound` (raw 3): the view re-reads the system when it appears, which
+    /// clears a failure that came only from an action, so the status itself is what keeps the line.
+    private struct SettingsFixture {
+        let name: String
+        let rawStatus: Int
+        var runsFromApplications = true
+        var energySaver = false
+    }
+
+    private static let settingsFixtures = [
+        SettingsFixture(name: "off", rawStatus: 0),
+        SettingsFixture(name: "on", rawStatus: 1),
+        SettingsFixture(name: "approval", rawStatus: 2),
+        SettingsFixture(name: "failure", rawStatus: 3),
+        SettingsFixture(name: "energysaver", rawStatus: 1, energySaver: true),
+        SettingsFixture(name: "location", rawStatus: 0, runsFromApplications: false),
+    ]
+
+    /// Renders the real Settings view (`SettingsView`) hosted in an `NSHostingView` in an off-screen
+    /// window, like the window fixtures: `ImageRenderer` cannot draw a switch or a pop-up (RESEARCH
+    /// Pitfall 12). Each PNG is 480 pt wide at the view's own intrinsic height; the log line carries
+    /// the frame and the host's fitting height, which the render gate requires to be equal (the
+    /// window never scrolls or clips).
+    private static func renderSettings(to directory: URL, language: String) async -> Int {
+        var count = 0
+        for fixture in settingsFixtures {
+            for scheme in [ColorScheme.light, .dark] {
+                let suiteName = "io.github.latarocaballero.Metr.render-settings"
+                let preferences = UserDefaults(suiteName: suiteName) ?? .standard
+                preferences.removePersistentDomain(forName: suiteName)
+                if fixture.energySaver {
+                    preferences.set(RefreshSpeed.energySaver.rawValue, forKey: RefreshSpeed.defaultsKey)
+                }
+                let model = LoginItemModel(
+                    service: FixtureLoginItemService(
+                        rawStatus: fixture.rawStatus, runsFromApplications: fixture.runsFromApplications))
+                let rendered = SettingsView(preferences: preferences, loginItems: model)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .environment(\.colorScheme, scheme)
+                let host = NSHostingView(rootView: rendered)
+                let height = host.fittingSize.height
+                host.frame = NSRect(x: 0, y: 0, width: 480, height: height)
+                let window = OffscreenWindow(
+                    contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+                window.contentView = host
+                // As in the window fixtures: one point on screen so SwiftUI keeps drawing, see-through.
+                let edge = NSScreen.screens.first?.frame.minX ?? 0
+                window.setFrameOrigin(NSPoint(x: edge - 480 + 1, y: 0))
+                window.alphaValue = 0.01
+                window.ignoresMouseEvents = true
+                window.orderFront(nil)
+                try? await Task.sleep(for: .milliseconds(500))
+                host.layoutSubtreeIfNeeded()
+
+                let name = "settings-\(language)-\(fixture.name)-\(scheme == .dark ? "dark" : "light").png"
+                if let written = snapshot(host, to: directory.appending(path: name)) {
+                    DebugHooks.log(
+                        "rendered \(name) width=\(Int(written.width.rounded())) height=\(Int(written.height.rounded())) fitting=\(Int(host.fittingSize.height.rounded()))"
+                    )
+                    count += 1
+                }
+                window.close()
+                preferences.removePersistentDomain(forName: suiteName)
             }
         }
         return count
