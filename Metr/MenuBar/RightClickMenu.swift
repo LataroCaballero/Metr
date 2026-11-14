@@ -4,10 +4,11 @@ import AppKit
 @objc protocol RightClickMenuActions: AnyObject {
     func showAbout(_ sender: Any?)
     func openWindow(_ sender: Any?)
+    func openSettings(_ sender: Any?)
 }
 
-/// The right-click and control-click menu (D-10, extended by Phase 3 D-01): About Metr, Open Window
-/// (Cmd-0 shown), a separator, Quit Metr. Text only. A later phase adds the preferences item.
+/// The right-click and control-click menu (D-10, extended by Phase 3 D-01 and Phase 4 D-01): About Metr,
+/// Open Window (Cmd-0 shown), Settings (Cmd-, shown), a separator, Quit Metr. Text only.
 enum RightClickMenu {
     /// Activates Metr and shows the standard About panel in front of other apps' windows.
     static func showAbout() {
@@ -33,6 +34,14 @@ enum RightClickMenu {
         open.keyEquivalentModifierMask = .command
         open.target = target
         menu.addItem(open)
+
+        let settings = NSMenuItem(
+            title: String(localized: "Settings…"),
+            action: #selector(RightClickMenuActions.openSettings(_:)),
+            keyEquivalent: ",")
+        settings.keyEquivalentModifierMask = .command
+        settings.target = target
+        menu.addItem(settings)
 
         menu.addItem(NSMenuItem.separator())
 

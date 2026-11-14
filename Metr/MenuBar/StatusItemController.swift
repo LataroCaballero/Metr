@@ -14,6 +14,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
 
     /// Opens the Metr window (PANEL-06, D-01). Set by the app delegate, which owns the window.
     var openWindow: ((WindowRoute) -> Void)?
+    /// Opens the Settings window (D-01); AppDelegate closes the panel first.
+    var openSettings: (() -> Void)?
 
     /// Last state assigned to the button. The image is rebuilt only when this changes (T-01-20).
     private var lastAssigned: GlyphState?
@@ -247,6 +249,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate, NSMenuDelegate, R
 
     @objc func showAbout(_ sender: Any?) {
         RightClickMenu.showAbout()
+    }
+
+    @objc func openSettings(_ sender: Any?) {
+        openSettings?()
     }
 
     @objc func openWindow(_ sender: Any?) {

@@ -1902,6 +1902,66 @@
           }
         }
       }
+    },
+    "Settings…": {
+      "comment": "Right-click menu item and app menu item that open the Settings window",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajustes…"
+          }
+        }
+      }
+    },
+    "Settings": {
+      "comment": "Title of the Settings window",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajustes"
+          }
+        }
+      }
+    },
+    "Refresh speed": {
+      "comment": "Settings pop-up label for how often Metr updates",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Velocidad de actualización"
+          }
+        }
+      }
+    },
+    "Energy Saver": {
+      "comment": "Settings pop-up choice: Metr updates half as often",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ahorro de energía"
+          }
+        }
+      }
+    },
+    "Updates less often to save battery. Metr also does this automatically in Low Power Mode.": {
+      "comment": "Footnote under the Refresh speed pop-up in Settings, also its accessibility hint",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se actualiza con menos frecuencia para ahorrar batería. Metr también lo hace automáticamente en el modo de bajo consumo."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -3,7 +3,8 @@ import MetrCore
 import MetrSystem
 
 /// Turns system sleep, display sleep, session changes and power/thermal pressure into
-/// suspend/resume/constrained calls on the sampler (FND-02).
+/// suspend/resume/constrained calls on the sampler (FND-02). The Refresh speed preference joins the
+/// system half here (D-05): the cadence is constrained when the user chose Energy Saver OR the system is.
 ///
 /// Every observer is a block on `OperationQueue.main` wrapped in `MainActor.assumeIsolated`.
 /// ProcessInfo notifications can be posted from other threads, and a MainActor `@objc`
@@ -11,10 +12,13 @@ import MetrSystem
 @MainActor
 final class SystemLifecycleMonitor {
     private let sampler: MetricsSampler
+    /// The store the Settings pop-up writes the Refresh speed into.
+    private let preferences: UserDefaults
     private var tokens: [any NSObjectProtocol] = []
 
-    init(sampler: MetricsSampler) {
+    init(sampler: MetricsSampler, preferences: UserDefaults) {
         self.sampler = sampler
+        self.preferences = preferences
     }
 
     func start() {
@@ -44,18 +48,31 @@ final class SystemLifecycleMonitor {
 
         let center = NotificationCenter.default
         for name in [Notification.Name.NSProcessInfoPowerStateDidChange, ProcessInfo.thermalStateDidChangeNotification] {
-            observe(center, name) { sampler in sampler.setConstrained(Self.isConstrained()) }
+            observe(center, name) { [weak self] _ in self?.applyConstrained() }
         }
-        sampler.setConstrained(Self.isConstrained())
+        // The Refresh speed pop-up writes into `preferences`; the change takes effect at once, with no
+        // restart (SET-02). Unrelated writes to the same store are harmless: the scheduler ignores an
+        // unchanged value.
+        observe(center, UserDefaults.didChangeNotification, object: preferences) { [weak self] _ in
+            self?.applyConstrained()
+        }
+        applyConstrained()
+    }
+
+    /// Effective constrained = the user chose Energy Saver OR the system is constrained (D-05).
+    private func applyConstrained() {
+        let speed = RefreshSpeed(storedValue: preferences.string(forKey: RefreshSpeed.defaultsKey))
+        sampler.setConstrained(ConstrainedResolver.resolve(speed: speed, systemConstrained: Self.isConstrained()))
     }
 
     private func observe(
         _ center: NotificationCenter,
         _ name: NSNotification.Name,
+        object: AnyObject? = nil,
         _ body: @escaping @MainActor (MetricsSampler) -> Void
     ) {
         let sampler = self.sampler
-        let token = center.addObserver(forName: name, object: nil, queue: .main) { _ in
+        let token = center.addObserver(forName: name, object: object, queue: .main) { _ in
             MainActor.assumeIsolated { body(sampler) }
         }
         tokens.append(token)

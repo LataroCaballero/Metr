@@ -13,6 +13,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let windowModel = WindowModel()
     /// Created on the first open and kept (the window object is reused; its content is not).
     private var windowController: WindowController?
+    /// The preferences the Settings window writes and the lifecycle monitor reads (D-05). A scripted
+    /// DEBUG run uses its own suite, so scripted verification never writes the owner's domain.
+    let preferences: UserDefaults = AppDelegate.makePreferences()
+    /// Created on the first open and kept, like the main window's controller.
+    private var settingsController: SettingsWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         DebugHooks.runLoginItemSpikeIfRequested()
@@ -28,11 +33,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.sampler = sampler
         let statusItemController = StatusItemController(store: store, sampler: sampler)
         statusItemController.openWindow = { [weak self] route in self?.showWindow(route) }
+        statusItemController.openSettings = { [weak self] in self?.showSettings() }
         self.statusItemController = statusItemController
         // Register BEFORE start so the first plan already reflects the override.
         for consumer in DebugHooks.demandOverride { sampler.register(consumer) }
         sampler.start(onBatch: Self.makeBatchSink(store: store), diagnostics: DebugHooks.diagnostics)
-        let monitor = SystemLifecycleMonitor(sampler: sampler)
+        let monitor = SystemLifecycleMonitor(sampler: sampler, preferences: preferences)
         lifecycleMonitor = monitor
         monitor.start()
         presentWelcomeIfFirstLaunch()
@@ -55,6 +61,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.show(route)
     }
 
+    /// The one entry point for opening Settings: the right-click item, Cmd-, and the app menu land here.
+    /// The panel closes first (D-01, the same rule as the window's Phase 3 D-02).
+    func showSettings() {
+        statusItemController?.closePanel()
+        let controller = settingsController ?? SettingsWindowController(
+            preferences: preferences, isMainWindowOpen: { [weak self] in self?.windowModel.isOpen ?? false })
+        settingsController = controller
+        controller.show()
+    }
+
+    /// The preferences store: `.standard`, except that a scripted DEBUG run uses a throwaway suite,
+    /// cleared at launch (a SIGTERM skips app cleanup, so the verification script deletes it too).
+    private static func makePreferences() -> UserDefaults {
+        #if DEBUG
+        if DebugHooks.windowScriptActive {
+            let name = "io.github.latarocaballero.Metr.script"
+            if let suite = UserDefaults(suiteName: name) {
+                suite.removePersistentDomain(forName: name)
+                return suite
+            }
+        }
+        #endif
+        return .standard
+    }
+
     /// DEBUG only: drives the window from METR_DEBUG_WINDOW_SCRIPT, `step@seconds` pairs separated
     /// by `;`. A step is a section name, `last`, `miniaturize`, `deminiaturize`, `close`,
     /// `sort:<column>:<asc|desc>` (the Processes table sorts as if its header had been clicked) or
@@ -63,7 +94,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Processes search), `select:<groupID>`, `deselect` and `hover:<0|1>` (the pointer over the
     /// table), and `quit:<pid>` (Quit on the app or standalone row of that pid, through the shared action
     /// controller; only for a process the run's author spawned) and `forcequit-dryrun:<groupID>` (logs how the
-    /// Force Quit alert's buttons are configured; the alert is never shown). Release has no script and no environment name.
+    /// Force Quit alert's buttons are configured; the alert is never shown), `settings` (the right-click
+    /// item's path), `settings-close` and `speed:<normal|energySaver>` (writes the Refresh speed into the
+    /// store the pop-up writes). Release has no script and no environment name.
     private func runWindowScriptIfRequested() {
         #if DEBUG
         for (step, seconds) in DebugHooks.windowScript {
@@ -74,6 +107,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.showWindow(.lastVisited)
                     } else if step == "close" {
                         self.windowController?.closeWindow()
+                    } else if step == "settings" {
+                        self.statusItemController?.openSettings(nil)
+                    } else if step == "settings-close" {
+                        self.settingsController?.closeWindow()
+                    } else if step.hasPrefix("speed:") {
+                        let raw = String(step.dropFirst("speed:".count))
+                        self.preferences.set(raw, forKey: RefreshSpeed.defaultsKey)
+                        DebugHooks.log("settings speed=\(raw)")
                     } else if step == "miniaturize" {
                         self.windowController?.miniaturizeForScript()
                     } else if step == "deminiaturize" {
