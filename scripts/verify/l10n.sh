@@ -2,10 +2,13 @@
 # Usage: scripts/verify/l10n.sh
 # Fails when any String Catalog key lacks a translated, non-empty ES value.
 # When METR_APP_RELEASE exists, also requires es.lproj/Localizable.strings in the bundle.
+# Also requires every key of Metr/InfoPlist.xcstrings to have a translated ES value, the project's
+# knownRegions to list en and es, and (when the Release app exists) en.lproj and es.lproj InfoPlist.strings
+# whose ES NSHumanReadableCopyright equals the catalog's ES value.
 # Also fails when the keys the compiler extracted from the Swift sources (the newest Debug or Release
 # build's *.stringsdata, "Localizable" table) differ from the catalog's non-stale keys, in either
 # direction: a used key missing from the catalog, or a catalog key no code uses.
-# Prints "L10N OK keys=<n> extracted=<n>".
+# Prints "L10N OK keys=<n> extracted=<n> infoplist=<n>".
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -111,4 +114,46 @@ if [ -d "$METR_APP_RELEASE" ]; then
     || { echo "FAIL: Release bundle has no es.lproj/Localizable.strings" >&2; exit 1; }
 fi
 
-echo "L10N OK keys=$keys extracted=$extracted"
+# InfoPlist.xcstrings: every key translated to ES (the copyright line follows the system language).
+INFOPLIST_CATALOG="Metr/InfoPlist.xcstrings"
+[ -f "$INFOPLIST_CATALOG" ] || { echo "FAIL: $INFOPLIST_CATALOG not found" >&2; exit 1; }
+infoplist="$(python3 -I - "$INFOPLIST_CATALOG" <<'PY'
+import json, sys
+
+catalog = json.load(open(sys.argv[1], encoding="utf-8"))
+if catalog.get("sourceLanguage") != "en":
+    print("FAIL: InfoPlist sourceLanguage is not en")
+    sys.exit(1)
+missing, count = [], 0
+for key, entry in catalog.get("strings", {}).items():
+    count += 1
+    unit = entry.get("localizations", {}).get("es", {}).get("stringUnit", {})
+    if unit.get("state") != "translated" or not str(unit.get("value", "")).strip():
+        missing.append(key)
+if missing or count == 0:
+    print("FAIL: InfoPlist keys without a translated ES value: " + repr(missing))
+    sys.exit(1)
+print(count)
+PY
+)" || { echo "$infoplist"; exit 1; }
+
+# The project must list both regions, or the lproj folders are not built (RESEARCH Pitfall 11 asserts
+# the folders, not CFBundleLocalizations).
+regions="$(awk '/knownRegions = \(/{f=1; next} f && /\);/{exit} f{gsub(/[[:space:],]/, ""); print}' Metr.xcodeproj/project.pbxproj)"
+for region in en es; do
+  printf '%s\n' "$regions" | grep -qx "$region" || { echo "FAIL: knownRegions does not list $region" >&2; exit 1; }
+done
+
+if [ -d "$METR_APP_RELEASE" ]; then
+  resources="$METR_APP_RELEASE/Contents/Resources"
+  for lang in en es; do
+    [ -s "$resources/$lang.lproj/InfoPlist.strings" ] \
+      || { echo "FAIL: Release bundle has no $lang.lproj/InfoPlist.strings" >&2; exit 1; }
+  done
+  expected="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["strings"]["NSHumanReadableCopyright"]["localizations"]["es"]["stringUnit"]["value"])' "$INFOPLIST_CATALOG")"
+  actual="$(plutil -extract NSHumanReadableCopyright raw -o - "$resources/es.lproj/InfoPlist.strings" 2>/dev/null || true)"
+  [ "$actual" = "$expected" ] \
+    || { echo "FAIL: es.lproj/InfoPlist.strings NSHumanReadableCopyright is '$actual', expected '$expected'" >&2; exit 1; }
+fi
+
+echo "L10N OK keys=$keys extracted=$extracted infoplist=$infoplist"

@@ -2106,6 +2106,42 @@
           }
         }
       }
+    },
+    "Free and open source (MIT License). Metr makes no network connections.": {
+      "comment": "About panel credits: the license and no-network statement",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Software libre y de código abierto (licencia MIT). Metr no realiza conexiones de red."
+          }
+        }
+      }
+    },
+    "Check for updates on GitHub": {
+      "comment": "About panel credits link to the GitHub releases page",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buscar actualizaciones en GitHub"
+          }
+        }
+      }
+    },
+    "Source code": {
+      "comment": "About panel credits link to the GitHub repository",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Código fuente"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
