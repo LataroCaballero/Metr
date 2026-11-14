@@ -14,9 +14,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     private let preferences: UserDefaults
     private let presence: WindowPresence
+    private let loginItems: LoginItemModel
 
-    init(preferences: UserDefaults, presence: WindowPresence) {
+    init(preferences: UserDefaults, presence: WindowPresence, loginItems: LoginItemModel) {
         self.preferences = preferences
+        self.loginItems = loginItems
         self.presence = presence
         // Not resizable and no zoom (UI-SPEC: the Form has a fixed width and its own height).
         let window = NSWindow(
@@ -40,7 +42,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         guard let window else { return }
         let firstOpen = window.contentViewController == nil
         if firstOpen {
-            let host = NSHostingController(rootView: SettingsView(preferences: preferences))
+            let host = NSHostingController(rootView: SettingsView(preferences: preferences, loginItems: loginItems))
             // The window owns its size: a hosting controller that resizes the window from the Form's
             // own layout pass loops (an AppKit "update constraints" exception on macOS 26). The Form
             // has a fixed width and an intrinsic height (`SettingsView` pins it), so measure it once

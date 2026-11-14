@@ -18,6 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The preferences the Settings window writes and the lifecycle monitor reads (D-05). A scripted
     /// DEBUG run uses its own suite, so scripted verification never writes the owner's domain.
     let preferences: UserDefaults = AppDelegate.makePreferences()
+    /// The Open at login projection, one for the app lifetime: the Settings view re-reads the system
+    /// on appear and on activation, so a long-lived model never goes stale (D-04).
+    let loginItems = LoginItemModel(service: SystemLoginItemService())
     /// Created on the first open and kept, like the main window's controller.
     private var settingsController: SettingsWindowController?
 
@@ -68,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showSettings() {
         statusItemController?.closePanel()
         let controller = settingsController ?? SettingsWindowController(
-            preferences: preferences, presence: windowPresence)
+            preferences: preferences, presence: windowPresence, loginItems: loginItems)
         settingsController = controller
         controller.show()
     }
@@ -97,8 +100,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// table), and `quit:<pid>` (Quit on the app or standalone row of that pid, through the shared action
     /// controller; only for a process the run's author spawned) and `forcequit-dryrun:<groupID>` (logs how the
     /// Force Quit alert's buttons are configured; the alert is never shown), `settings` (the right-click
-    /// item's path), `panel`, `gear` (the panel footer gear) and `menu` (opens the real right-click menu, cancelled after 4 s), `settings-close` and `speed:<normal|energySaver>` (writes the Refresh speed into the
-    /// store the pop-up writes). Release has no script and no environment name.
+    /// item's path), `panel`, `gear` (the panel footer gear) and `menu` (opens the real right-click menu, cancelled after 4 s), `settings-close`, `speed:<normal|energySaver>` (writes the Refresh speed into the
+    /// store the pop-up writes) and `login:<on|off>` (flips the Open at login switch through its model). Release has no script and no environment name.
     private func runWindowScriptIfRequested() {
         #if DEBUG
         for (step, seconds) in DebugHooks.windowScript {
@@ -123,6 +126,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         let raw = String(step.dropFirst("speed:".count))
                         self.preferences.set(raw, forKey: RefreshSpeed.defaultsKey)
                         DebugHooks.log("settings speed=\(raw)")
+                    } else if step.hasPrefix("login:") {
+                        let on = step == "login:on"
+                        self.loginItems.setEnabled(on)
+                        DebugHooks.log("settings login request=\(on ? "on" : "off") \(self.loginItems.debugDescription)")
                     } else if step == "miniaturize" {
                         self.windowController?.miniaturizeForScript()
                     } else if step == "deminiaturize" {

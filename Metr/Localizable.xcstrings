@@ -1927,6 +1927,66 @@
         }
       }
     },
+    "Open at login": {
+      "comment": "Settings switch: start Metr when the user logs in",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir al iniciar sesión"
+          }
+        }
+      }
+    },
+    "Allow Metr in System Settings › General › Login Items & Extensions.": {
+      "comment": "Status line under Open at login when macOS needs the user's approval",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permite a Metr en Ajustes del Sistema › General › Ítems de inicio y extensiones."
+          }
+        }
+      }
+    },
+    "Metr couldn't change this setting. You can manage it in System Settings › General › Login Items & Extensions.": {
+      "comment": "Status line under Open at login when registering or unregistering failed",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metr no ha podido cambiar este ajuste. Puedes gestionarlo en Ajustes del Sistema › General › Ítems de inicio y extensiones."
+          }
+        }
+      }
+    },
+    "Open Login Items Settings": {
+      "comment": "Button that opens the Login Items pane of System Settings",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir ajustes de Ítems de inicio"
+          }
+        }
+      }
+    },
+    "Move Metr to your Applications folder to open it at login.": {
+      "comment": "Status line under Open at login when Metr runs outside /Applications",
+      "extractionState": "manual",
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mueve Metr a la carpeta Aplicaciones para abrirlo al iniciar sesión."
+          }
+        }
+      }
+    },
     "Refresh speed": {
       "comment": "Settings pop-up label for how often Metr updates",
       "extractionState": "manual",
