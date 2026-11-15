@@ -1,0 +1,41 @@
+name: CI
+
+# Every push and pull request builds the Release app and runs the same gates and tests as the owner's Mac.
+# It publishes nothing and has read-only access.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      METR_CI: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select Xcode 26.6
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app
+      - name: Release build
+        run: bash scripts/build.sh release
+      - name: Bundle gate
+        run: bash scripts/verify/bundle.sh
+      - name: Zero-network gate
+        run: bash scripts/verify/no-network.sh
+      - name: Localization gate
+        run: bash scripts/verify/l10n.sh
+      - name: Public-content gate
+        run: bash scripts/verify/public-content.sh
+      - name: MetrKit tests
+        run: bash scripts/test.sh
