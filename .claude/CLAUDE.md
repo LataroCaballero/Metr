@@ -108,8 +108,8 @@ Metr is a free, open-source system monitor for macOS (Apple Silicon only). It co
 | Xcode 26.6 or 27.x | Build, Instruments (SwiftUI instrument, Time Profiler to verify Metr's own CPU), Icon Composer, String Catalog editor | Install the full Xcode. Command Line Tools alone cannot build the app. `xcodebuild` errors with "requires Xcode". |
 | Icon Composer (bundled with Xcode 26+) | Layered Liquid Glass app icon (`.icon`) | Apple's adoption guide asks for layered icons. Icon Composer 2.0 in Xcode 27 adds a sharper rendering mode for upcoming OSes. |
 | `xcodebuild` | Release build and archive | Command shown below. Ad-hoc sign for Apple Silicon. |
-| `create-dmg` (create-dmg/create-dmg, shell script, **v1.3.0**) | Pretty .dmg with Applications symlink and background | `brew install create-dmg`. Use `--skip-jenkins` on headless CI. Without `--skip-jenkins` it drives Finder via AppleScript and can hang. Not installed on this Mac or in the GitHub `macos-26` image. |
-| GitHub Actions `macos-26` (arm64) | Build and release | Image is macOS 26.6.2 with **Xcode 26.6 (17F113) as default**. Add `brew install create-dmg`. Use `gh release create`. |
+| `dmgbuild` **1.6.7** (dmgbuild/dmgbuild, Python, with `ds_store` 1.3.3 and `mac_alias` 2.2.3) | Headless .dmg with Applications symlink, background and icon layout (D-21) | Hash-pinned (`--require-hashes --no-deps`) in a venv outside the repo, built by `scripts/release/make-dmg.sh`; needs Python 3.10 or newer and no Finder; the layout is read back from the image's `.DS_Store` by `scripts/verify/dmg.sh`. Rejected: `create-dmg` v1.3.0, because `--skip-jenkins` skips the only step that applies the layout. |
+| GitHub Actions `macos-26` (arm64) | Build and release | Image is macOS 26.6.2 with **Xcode 26.6 (17F113) as default**. The DMG step uses the runner's Python 3.10 or newer (`scripts/release/make-dmg.sh`). Use `gh release create`. |
 | `gh`, `brew` | Release and tooling | Already installed locally. |
 
 ## Installation
@@ -141,8 +141,8 @@ Metr is a free, open-source system monitor for macOS (Apple Silicon only). It co
 | SMC table + HID fallback for temps | HID only | If you want zero per-chip tables. On M4 it gave `PMU tdie` die temps but no named CPU/GPU cluster, so labelling is weaker. |
 | libproc plus `ps` merge for processes | Spawn `top -l 2` only | Simpler, and covers all PIDs (Stats does this). But every refresh costs a full second plus a process spawn and parsing text. Use as the fallback if the `ps` delta approach proves unreliable. |
 | `sysctl NET_RT_IFLIST2` | `getifaddrs` | Only for interface discovery and addresses. Counters are 32-bit there. |
-| create-dmg (shell) | `hdiutil create -srcfolder` | If you want no dependency. You lose the background and icon layout. |
-| create-dmg (shell) | create-dmg (Node, sindresorhus) | If you will notarize later. Its README stresses signing and notarizing. Not relevant for v1. |
+| dmgbuild (Python, hash-pinned venv) | `hdiutil create -srcfolder` | If you want no dependency. You lose the background and icon layout. |
+| dmgbuild (Python, hash-pinned venv) | create-dmg (Node, sindresorhus) | If you will notarize later. Its README stresses signing and notarizing. Not relevant for v1. |
 
 ## What NOT to Use
 

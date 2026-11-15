@@ -3,12 +3,16 @@
 # Turns a release tag into a Release Metr.app that is staged, ad-hoc re-signed last and verified.
 #   TAG      v<major>.<minor>.<patch> with an optional -rc.<n>; the numeric part must equal the
 #            project's MARKETING_VERSION in both target configurations (D-10)
-#   --out    directory the DMG step (04-08) writes to; accepted and recorded here, not used
+#   --out    directory that receives Metr-<version>.dmg, Metr-<version>.dmg.sha256 and notes.md (D-21):
+#            after the checks below, make-dmg.sh builds the DMG from the staged app, verify/dmg.sh proves
+#            it, notes.sh writes the bilingual release notes. If any step fails the three files are
+#            removed from DIR and the script exits non-zero, so CI publishes nothing (S8 error).
 # CFBundleShortVersionString is the numeric part of the tag (an rc ships the same string), and
 # CFBundleVersion is `git rev-list --count HEAD`: monotonic along history, so a newer download
 # replaces an older install, and identical locally and on CI (the checkout needs full history).
 # Runs unchanged on the owner's Mac and in CI mode (METR_CI=1).
-# Prints "RELEASE-BUILD OK version=<v> build=<n> cdhash=<h> app=<path>".
+# Prints "RELEASE-BUILD OK version=<v> build=<n> cdhash=<h> app=<path>" and, with --out,
+# "RELEASE-DIST OK dmg=<path> sha256=<hex> notes=<path>".
 # Exit 2 on a bad tag or bad arguments, 1 on any failed gate.
 set -euo pipefail
 
@@ -87,7 +91,27 @@ sig_info="$(codesign -dvvv "$STAGED" 2>&1)"
 CDHASH="$(printf '%s\n' "$sig_info" | sed -n 's/^CDHash=//p' | head -n 1)"
 [[ "$CDHASH" =~ ^[0-9a-f]{40}$ ]] || fail "could not read a 40-hex CDHash from the staged app"
 
-if [ -n "$OUT_DIR" ]; then
-  echo "OUT=$OUT_DIR" >&2
-fi
 echo "RELEASE-BUILD OK version=$VERSION build=$BUILD cdhash=$CDHASH app=$STAGED"
+
+# 7. The release assets (only with --out): DMG, its checksum and the notes, or nothing at all.
+if [ -n "$OUT_DIR" ]; then
+  mkdir -p "$OUT_DIR"
+  OUT_DIR="$(cd "$OUT_DIR" && pwd -P)"
+  DMG="$OUT_DIR/Metr-$VERSION.dmg"
+  NOTES="$OUT_DIR/notes.md"
+  DIST_OK=0
+  # A failed run must leave no release asset behind: remove the three files (this script's own outputs).
+  cleanup_dist() { [ "$DIST_OK" = "1" ] || rm -f -- "$DMG" "$DMG.sha256" "$NOTES"; }
+  trap cleanup_dist EXIT
+  rm -f -- "$DMG" "$DMG.sha256" "$NOTES"
+
+  built="$(bash scripts/release/make-dmg.sh "$STAGED" "$VERSION" "$OUT_DIR" | tee /dev/stderr | sed -n 's/^DMG BUILT .* sha256=//p')"
+  [[ "$built" =~ ^[0-9a-f]{64}$ ]] || fail "make-dmg.sh did not report a SHA-256"
+  bash scripts/verify/dmg.sh "$DMG" "$STAGED" >&2
+  bash scripts/release/notes.sh "$VERSION" "$DMG" "$NOTES" >&2
+  [ "$(cut -d' ' -f1 "$DMG.sha256")" = "$built" ] || fail "the checksum file differs from the DMG's SHA-256"
+  grep -q "$built" "$NOTES" || fail "the notes do not carry the DMG's SHA-256"
+
+  DIST_OK=1
+  echo "RELEASE-DIST OK dmg=$DMG sha256=$built notes=$NOTES"
+fi

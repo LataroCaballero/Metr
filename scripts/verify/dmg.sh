@@ -9,6 +9,9 @@
 #   - the DMG itself verifies and reports Signature=adhoc
 #   - the committed background.tiff holds a 600 x 400 and a 1200 x 800 representation, and the copy
 #     inside the image is that file
+#   - informational only: a copy of the DMG gets a Safari-style quarantine attribute and spctl assesses it
+#     (expected: rejected, which is why the README documents Open Anyway; RESEARCH Pitfall 8). Printed as the
+#     spctl line (rejected or accepted), it never fails the gate
 # The trap always detaches. Prints "DMG OK layout=600x400 icons=2 inner_cdhash=<h> signature=adhoc".
 set -euo pipefail
 
@@ -108,6 +111,18 @@ for name, expected in (("Metr.app", (168, 180)), ("Applications", (432, 180))):
     if got != expected:
         fail("Iloc of %s is %r, expected %r" % (name, got, expected))
 PY
+
+# Gatekeeper on a quarantined copy (informational; the original is never touched).
+GK_DIR="$(mktemp -d)"
+cp -- "$DMG" "$GK_DIR/copy.dmg"
+xattr -w com.apple.quarantine "0083;$(printf '%x' "$(date +%s)");Safari;" "$GK_DIR/copy.dmg" 2>/dev/null || true
+if spctl --assess --type open --context context:primary-signature "$GK_DIR/copy.dmg" >/dev/null 2>&1; then
+  GK="accepted"
+else
+  GK="rejected"
+fi
+rm -rf -- "$GK_DIR"
+echo "DMG GATEKEEPER spctl=$GK"
 
 SIG="$(printf '%s\n' "$dmg_sig" | sed -n 's/^Signature=//p')"
 echo "DMG OK layout=600x400 icons=2 inner_cdhash=$INNER signature=$SIG"
