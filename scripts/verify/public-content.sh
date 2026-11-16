@@ -97,8 +97,8 @@ ALLOW = [(g, expand(s), r) for g, s, r in ALLOW_RAW]
 
 # <commit>|<path>|<pending or approved>|<reason>. An approved entry needs the owner's words and the date.
 HISTORY_DECISIONS = [
-    ("52940e1", ".planning/PROJECT.md", "pending",
-     "the first commit added it and 2dd37af removed it; both are on main and the work branch, so pushing publishes it through the history"),
+    ("52940e1", ".planning/PROJECT.md", "approved",
+     "owner approved 2026-11-16: \"solo describe el producto, nada personal\" (it only describes the product, nothing personal); the first commit added it and 2dd37af removed it, both on main and the work branch"),
 ]
 
 def git(*args, text=True):
