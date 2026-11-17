@@ -12,7 +12,7 @@
 # ready=1 minus the uptime of the first `procs n=` line.
 #
 # Prints
-#   PANEL-COST metr_cpu=<v> top_cpu=<v> total=<v> warmup=<s>
+#   PANEL-COST metr_cpu=<v> top_cpu=<v> total=<v> warmup=<s> metr_wakeups=<v> metr_footprint=<v>
 #   NO-ORPHAN (followed by OK; Metr is quit and its top child is gone within 3 s)
 # or "FAIL: <reason>" with exit 1. Every number is validated as a plain number (fail closed).
 # Fails when the warm-up is above 3.0 s or either log line is missing.
@@ -23,6 +23,10 @@ cd "$(git rev-parse --show-toplevel)"
 source scripts/env.sh
 # shellcheck source=lib.sh
 source scripts/perf/lib.sh
+
+# PANEL_COST_APP measures another build of the app than the Debug one, e.g. an optimized build with
+# the DEBUG hooks compiled in (the real Release build has no panel-demand hook and cannot be driven).
+METR_APP_DEBUG="${PANEL_COST_APP:-$METR_APP_DEBUG}"
 
 SECS="${1:-30}"
 case "$SECS" in
@@ -75,7 +79,9 @@ echo "$LINE"
 
 METR_CPU="$(printf '%s\n' "$LINE" | sed -E 's/.*cpu_pct=([0-9.]+).*/\1/')"
 WALL="$(printf '%s\n' "$LINE" | sed -E 's/.*wall_s=([0-9.]+).*/\1/')"
-for value in "$METR_CPU" "$WALL" "$TOP_BEFORE" "$TOP_AFTER"; do
+METR_WAKEUPS="$(printf '%s\n' "$LINE" | sed -E 's/.*wakeups_per_s=([0-9.]+).*/\1/')"
+METR_FOOTPRINT="$(printf '%s\n' "$LINE" | sed -E 's/.*footprint_mb=([0-9.]+).*/\1/')"
+for value in "$METR_CPU" "$WALL" "$TOP_BEFORE" "$TOP_AFTER" "$METR_WAKEUPS" "$METR_FOOTPRINT"; do
   metr_is_number "$value" || fail "FAIL: could not parse a number (value '$value', line: $LINE)"
 done
 TOP_CPU="$(awk -v a="$TOP_BEFORE" -v b="$TOP_AFTER" -v w="$WALL" \
@@ -91,7 +97,7 @@ metr_is_number "$FIRST" && metr_is_number "$READY" || fail "FAIL: could not pars
 WARMUP="$(awk -v a="$FIRST" -v b="$READY" 'BEGIN { printf "%.3f\n", b - a }')"
 metr_is_number "$WARMUP" || fail "FAIL: warm-up is not a plain number ($WARMUP)"
 
-echo "PANEL-COST metr_cpu=$METR_CPU top_cpu=$TOP_CPU total=$TOTAL warmup=$WARMUP"
+echo "PANEL-COST metr_cpu=$METR_CPU top_cpu=$TOP_CPU total=$TOTAL warmup=$WARMUP metr_wakeups=$METR_WAKEUPS metr_footprint=$METR_FOOTPRINT"
 [ "$(metr_gt "$WARMUP" "$WARMUP_MAX")" = "0" ] || fail "FAIL: warm-up ${WARMUP}s is above ${WARMUP_MAX}s"
 
 # Quit Metr: its top child must go with it (the read end of top's stdout dies with Metr, and the

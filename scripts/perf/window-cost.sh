@@ -52,7 +52,7 @@
 # MEASURED_WINDOW_AT (UTC). No threshold is ever written.
 #
 # Prints
-#   WINDOW-COST section=<s> metr_cpu=<v> top=<0|1>
+#   WINDOW-COST section=<s> metr_cpu=<v> top=<0|1> metr_wakeups=<v> metr_footprint=<v>
 #   NO-ORPHAN OK (only when a top child existed; otherwise NO-ORPHAN OK means none was left)
 #   WINDOW-COST after-close metr_cpu=<v> baseline=<v> (baseline_a=<v> baseline_b=<v>)
 #   WINDOW-COST cycles=<n> growth_mb=<v> first_open_mb=<v>
@@ -354,6 +354,9 @@ LINE="$("$RUSAGE_BIN" "$PID" "$SECS")" || fail "FAIL: proc_pid_rusage failed for
 echo "$LINE"
 METR_CPU="$(printf '%s\n' "$LINE" | sed -E 's/.*cpu_pct=([0-9.]+).*/\1/')"
 metr_is_number "$METR_CPU" || fail "FAIL: could not parse a number (value '$METR_CPU', line: $LINE)"
+METR_WAKEUPS="$(printf '%s\n' "$LINE" | sed -E 's/.*wakeups_per_s=([0-9.]+).*/\1/')"
+METR_FOOTPRINT="$(printf '%s\n' "$LINE" | sed -E 's/.*footprint_mb=([0-9.]+).*/\1/')"
+metr_is_number "$METR_WAKEUPS" && metr_is_number "$METR_FOOTPRINT" || fail "FAIL: could not parse wakeups or footprint (line: $LINE)"
 
 # The top child must still agree with the section after the measuring window (no late start).
 if [ "$SECTION" != "processes" ]; then
@@ -361,7 +364,7 @@ if [ "$SECTION" != "processes" ]; then
   [ -z "$LATE" ] || fail "FAIL: top child appeared with $SECTION selected (pid $LATE)"
 fi
 
-echo "WINDOW-COST section=$SECTION metr_cpu=$METR_CPU top=$TOP"
+echo "WINDOW-COST section=$SECTION metr_cpu=$METR_CPU top=$TOP metr_wakeups=$METR_WAKEUPS metr_footprint=$METR_FOOTPRINT"
 [ "$(metr_gt "$METR_CPU" "$BUDGET")" = "0" ] || fail "FAIL: window cpu $METR_CPU above $BUDGET"
 
 # Only the cpu and processes sections have a recorded value; the others are gated, not recorded.
