@@ -131,6 +131,8 @@ enum DebugSnapshotRenderer {
                     disk: .value(DiskReading(totalBytes: 494_000_000_000, availableBytes: 210_000_000_000)),
                     processes: firstFrameProcesses,
                     elapsed: 1)),
+            // The README panel shot: a calm Mac and only neutral apps (DIST-03, no personal data).
+            Fixture(name: "readme", batch: calmBatch(processes: readmeSnapshot)),
             Fixture(
                 name: "unavailable",
                 batch: MetricsBatch(
@@ -161,6 +163,115 @@ enum DebugSnapshotRenderer {
             // The process list cannot be read at all: one quiet line in the reserved area (E5 error).
             Fixture(name: "apps-error", batch: appsBatch(reading: .unavailable)),
         ]
+    }
+
+    /// The disk the demo shows: plenty free, so its ring is a quiet one.
+    private static let demoDisk = DiskReading(totalBytes: 994_000_000_000, availableBytes: 700_000_000_000)
+
+    /// The README panel batch: CPU about 14 %, memory pressure normal with no swap, disk with plenty free.
+    private static func calmBatch(processes: ProcessSnapshot) -> MetricsBatch {
+        MetricsBatch(
+            cpu: .value(
+                CPUReading(
+                    total: 0.14, user: 0.10, system: 0.04,
+                    clusters: [
+                        CPUCluster(name: "Performance", usage: 0.17),
+                        CPUCluster(name: "Efficiency", usage: 0.09),
+                    ])),
+            memory: .value(
+                MemoryReading(
+                    usedBytes: 9_400_000_000, totalBytes: totalMemory,
+                    swapUsedBytes: 0, freePercent: 64, pressure: .normal)),
+            disk: .value(demoDisk),
+            processes: .value(processes),
+            elapsed: 1)
+    }
+
+    /// Neutral own-user apps for the README shots: Apple's own apps only, no helpers, nothing that
+    /// names a user, a machine or a volume. Safari leads, so the list reads as an ordinary Mac.
+    private static var readmeSamples: [ProcessSample] {
+        let me = getuid()
+        let mib: UInt64 = 1_048_576
+        var next: Int32 = 1_000
+        var samples: [ProcessSample] = []
+        func add(_ path: String, _ command: String, cpu: Double, mib size: UInt64) {
+            next += 1
+            samples.append(
+                ProcessSample(
+                    identity: ProcessIdentity(pid: next, startMicros: Int64(next) * 1_000),
+                    ppid: 1, uid: me, path: path, command: command,
+                    cpuPercent: cpu, footprintBytes: size * mib))
+        }
+        add("/Applications/Safari.app/Contents/MacOS/Safari", "Safari", cpu: 6.8, mib: 610)
+        add("/System/Applications/Music.app/Contents/MacOS/Music", "Music", cpu: 3.9, mib: 380)
+        add("/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal", "Terminal", cpu: 2.4, mib: 160)
+        add("/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder", "Finder", cpu: 1.7, mib: 220)
+        add("/System/Applications/Notes.app/Contents/MacOS/Notes", "Notes", cpu: 0.9, mib: 310)
+        add("/System/Applications/Mail.app/Contents/MacOS/Mail", "Mail", cpu: 0.6, mib: 520)
+        add("/System/Applications/Calendar.app/Contents/MacOS/Calendar", "Calendar", cpu: 0.3, mib: 190)
+        add("/System/Applications/Preview.app/Contents/MacOS/Preview", "Preview", cpu: 0.2, mib: 140)
+        add("/System/Applications/System Settings.app/Contents/MacOS/System Settings", "System Settings", cpu: 0.1, mib: 120)
+        add("/System/Applications/Messages.app/Contents/MacOS/Messages", "Messages", cpu: 0.1, mib: 170)
+        return samples
+    }
+
+    private static var readmeSnapshot: ProcessSnapshot {
+        ProcessSnapshot(sequence: 1, processes: readmeSamples, cpuReady: true)
+    }
+
+    /// The README Processes shot: the neutral apps plus the two system rows that show the lock and a
+    /// few daemons, all with real-looking disk rates on the own rows.
+    private static var readmeTableSnapshot: ProcessSnapshot {
+        let mib: UInt64 = 1_048_576
+        var samples = readmeSamples
+        func system(_ pid: Int32, uid: UInt32, path: String?, _ command: String, cpu: Double, mib size: UInt64) {
+            samples.append(
+                ProcessSample(
+                    identity: ProcessIdentity(pid: pid, startMicros: Int64(pid) * 1_000),
+                    ppid: 1, uid: uid, path: path, command: command, cpuPercent: cpu, footprintBytes: size * mib))
+        }
+        system(0, uid: 0, path: nil, "kernel_task", cpu: 4.1, mib: 900)
+        system(
+            190, uid: 88,
+            path: "/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer",
+            "WindowServer", cpu: 3.3, mib: 512)
+        let tools: [(String, String, Double, UInt64)] = [
+            ("/usr/sbin/mDNSResponder", "mDNSResponder", 0.4, 22), ("/usr/libexec/trustd", "trustd", 0.2, 31),
+            ("/usr/libexec/syspolicyd", "syspolicyd", 0.1, 48), ("/usr/sbin/cfprefsd", "cfprefsd", 0.1, 12),
+            ("/usr/libexec/lsd", "lsd", 0.3, 26), ("/usr/sbin/coreaudiod", "coreaudiod", 0.6, 18),
+            ("/usr/libexec/logd", "logd", 0.5, 40), ("/usr/bin/sharingd", "sharingd", 0.2, 33),
+        ]
+        for (index, tool) in tools.enumerated() {
+            system(Int32(400 + index), uid: 0, path: tool.0, tool.1, cpu: tool.2, mib: tool.3)
+        }
+        let me = getuid()
+        let reads: [Double] = [340_000, 1_200_000, 0, 45_000, 880_000]
+        let writes: [Double] = [0, 91_000, 18_900_000, 0, 340_000]
+        for index in samples.indices where samples[index].uid == me {
+            samples[index].diskReadPerSec = reads[index % reads.count]
+            samples[index].diskWritePerSec = writes[(index * 3) % writes.count]
+        }
+        return ProcessSnapshot(sequence: 1, processes: samples, cpuReady: true, otherUsers: .available)
+    }
+
+    /// DEBUG demo mode (`METR_DEBUG_DEMO=1`): puts the README's calm, neutral data into a live store, so
+    /// the real menu bar item, panel and window show no real process, volume or name (D-18, T-04-23).
+    /// With no window session it applies only the latest second; with one it refills the five minutes of
+    /// history with explicit times, so a chart is full the moment the window opens.
+    static func applyDemo(to store: MetricsStore) {
+        let now = Date.now.timeIntervalSinceReferenceDate
+        let fixture = WindowFixture(
+            name: "demo", section: .cpu, populated: true, contentSize: NSSize(width: 1000, height: 640),
+            gpu: .live, memory: .calm, network: .live, calm: true)
+        let memory = memoryReading(second: 299, state: .calm)
+        let sessionActive = store.windowSessionActive
+        if sessionActive { store.beginWindowSession(at: now - 300) }
+        for second in 0..<300 where sessionActive || second == 299 {
+            var batch = historyBatch(second: second, fixture: fixture, memory: memory, disk: demoDisk)
+            if second == 299 { batch.processes = .value(readmeTableSnapshot) }
+            store.apply(batch, at: now - 299 + Double(second))
+        }
+        store.applyThermal(.normal)
     }
 
     /// The batch shared by the Top Apps fixtures: a busy-but-normal Mac with the given process reading.
@@ -382,6 +493,8 @@ enum DebugSnapshotRenderer {
         /// Draws the real sidebar beside the section at the full content size (the sidebar fixture):
         /// the worst-case values of every metric the sidebar can carry are fed to the store.
         var withSidebar = false
+        /// A calm Mac for the README shots: low CPU, no swap (the demo mode).
+        var calm = false
     }
 
     private enum ProcessFixtureState {
@@ -402,6 +515,8 @@ enum DebugSnapshotRenderer {
         case steady
         /// Five minutes that go Normal, Elevated, Critical and back to Normal.
         case pressure
+        /// Five minutes of a calm Mac: Normal pressure, no swap (the demo mode).
+        case calm
     }
 
     private enum NetworkFixtureState {
@@ -599,6 +714,11 @@ enum DebugSnapshotRenderer {
             return MemoryReading(
                 usedBytes: 12_025_908_428, totalBytes: totalMemory, swapUsedBytes: 1_288_490_189, freePercent: free,
                 pressure: .normal)
+        case .calm:
+            let free = Int((64 + 3 * sin(t / 30) + sin(t / 7)).rounded())
+            return MemoryReading(
+                usedBytes: 9_400_000_000, totalBytes: totalMemory, swapUsedBytes: 0, freePercent: free,
+                pressure: .normal)
         case .pressure:
             let (free, pressure): (Double, MemoryPressure) =
                 switch second {
@@ -648,6 +768,48 @@ enum DebugSnapshotRenderer {
         }
     }
 
+    /// Second `second` (0 to 299) of a populated window fixture's five minutes of history. Shared by the
+    /// fixtures and by the demo mode, so a live window and a rendered one draw the same shapes.
+    private static func historyBatch(
+        second: Int, fixture: WindowFixture, memory: MemoryReading, disk: DiskReading
+    ) -> MetricsBatch {
+        let performance = fixture.calm ? [0.24, 0.17, 0.08, 0.04] : [0.62, 0.41, 0.18, 0.07]
+        let efficiency = fixture.calm ? [0.16, 0.11, 0.08, 0.06, 0.03, 0.02] : [0.30, 0.22, 0.15, 0.11, 0.06, 0.03]
+        let t = Double(second)
+        // A busy minute, a quiet one, a busy tail: both series move so the stacking is visible.
+        let user =
+            fixture.calm
+            ? max(0.02, min(0.5, 0.10 + 0.05 * sin(t / 18) + 0.03 * sin(t / 5.5)))
+            : max(0.02, min(0.9, 0.22 + 0.14 * sin(t / 18) + 0.08 * sin(t / 5.5)))
+        let system =
+            fixture.calm
+            ? max(0.01, min(0.2, 0.035 + 0.015 * sin(t / 11 + 1) + 0.008 * sin(t / 3)))
+            : max(0.01, min(0.4, 0.09 + 0.05 * sin(t / 11 + 1) + 0.02 * sin(t / 3)))
+        let clusters = [
+            CPUCluster(name: "Performance", usage: fixture.calm ? 0.17 : 0.32, coreUsage: performance),
+            CPUCluster(name: "Efficiency", usage: fixture.calm ? 0.09 : 0.15, coreUsage: efficiency),
+        ]
+        let reading = CPUReading(total: user + system, user: user, system: system, clusters: clusters)
+        // Varied GPU load: a ramp, a plateau and a quiet tail, with a real zero at the start.
+        let load = max(0, min(1, 0.35 + 0.30 * sin(t / 25) + 0.15 * sin(t / 6)))
+        let gpu: Reading<GPUReading>? =
+            fixture.gpu == .live
+            ? .value(GPUReading(utilization: second < 5 ? 0 : load, chipName: "Apple M4", coreCount: 8)) : nil
+        // The memory fixtures feed one reading a second; the others only the last one.
+        let memoryBatch: Reading<MemoryReading>? =
+            fixture.memory == .lastOnly
+            ? (second == 299 ? .value(memory) : nil)
+            : .value(memoryReading(second: second, state: fixture.memory))
+        let network: Reading<NetworkReading>? =
+            fixture.network == .none ? nil : .value(networkReading(second: second, state: fixture.network))
+        return MetricsBatch(
+            cpu: .value(reading), memory: memoryBatch,
+            disk: second == 299 ? .value(disk) : nil, network: network, gpu: gpu,
+            diskIO: diskIOReading(second: second, state: fixture.diskIO),
+            volumes: second != 299 ? nil : volumeReading(for: fixture.volumes),
+            elapsed: 1)
+    }
+
     /// A store holding a fixture's own history: a window session that began 300 s ago and one
     /// synthetic batch per second since, applied with explicit times so no wall clock is involved.
     private static func windowStore(for fixture: WindowFixture) -> MetricsStore {
@@ -670,37 +832,10 @@ enum DebugSnapshotRenderer {
                 at: now)
             return store
         }
-        let performance = [0.62, 0.41, 0.18, 0.07]
-        let efficiency = [0.30, 0.22, 0.15, 0.11, 0.06, 0.03]
         for second in 0..<300 {
-            let t = Double(second)
-            // A busy minute, a quiet one, a busy tail: both series move so the stacking is visible.
-            let user = max(0.02, min(0.9, 0.22 + 0.14 * sin(t / 18) + 0.08 * sin(t / 5.5)))
-            let system = max(0.01, min(0.4, 0.09 + 0.05 * sin(t / 11 + 1) + 0.02 * sin(t / 3)))
-            let clusters = [
-                CPUCluster(name: "Performance", usage: 0.32, coreUsage: performance),
-                CPUCluster(name: "Efficiency", usage: 0.15, coreUsage: efficiency),
-            ]
-            let reading = CPUReading(total: user + system, user: user, system: system, clusters: clusters)
-            // Varied GPU load: a ramp, a plateau and a quiet tail, with a real zero at the start.
-            let load = max(0, min(1, 0.35 + 0.30 * sin(t / 25) + 0.15 * sin(t / 6)))
-            let gpu: Reading<GPUReading>? =
-                fixture.gpu == .live
-                ? .value(GPUReading(utilization: second < 5 ? 0 : load, chipName: "Apple M4", coreCount: 8)) : nil
-            // The memory fixtures feed one reading a second; the others only the last one.
-            let memoryBatch: Reading<MemoryReading>? =
-                fixture.memory == .lastOnly
-                ? (second == 299 ? .value(memory) : nil)
-                : .value(memoryReading(second: second, state: fixture.memory))
-            let network: Reading<NetworkReading>? =
-                fixture.network == .none ? nil : .value(networkReading(second: second, state: fixture.network))
-            let batch = MetricsBatch(
-                cpu: .value(reading), memory: memoryBatch,
-                disk: second == 299 ? .value(disk) : nil, network: network, gpu: gpu,
-                diskIO: diskIOReading(second: second, state: fixture.diskIO),
-                volumes: second != 299 ? nil : volumeReading(for: fixture.volumes),
-                elapsed: 1)
-            store.apply(batch, at: now - 299 + t)
+            store.apply(
+                historyBatch(second: second, fixture: fixture, memory: memory, disk: disk),
+                at: now - 299 + Double(second))
         }
         if fixture.withSidebar { applyWorstCase(to: store, at: now + 1) }
         return store

@@ -316,6 +316,9 @@ final class MetricsStore {
         case .value(let snapshot):
             let me = getuid()
             let own = snapshot.processes.filter { $0.uid == me }.count
+            // Demo mode (README captures) applies fixture rows and samples nothing: the line says so, so a
+            // log can tell fixture data from a real sample (the "procs n=" line is the sampler's).
+            if DebugHooks.demoMode { return "fixture-procs count=\(snapshot.processes.count)" }
             return "procs n=\(snapshot.processes.count) own=\(own)"
                 + " other=\(snapshot.processes.count - own) ready=\(snapshot.cpuReady ? 1 : 0)"
                 + " sys=\(snapshot.otherUsers.rawValue)"

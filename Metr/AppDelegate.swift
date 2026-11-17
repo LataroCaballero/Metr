@@ -43,6 +43,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemController.openWindow = { [weak self] route in self?.showWindow(route) }
         statusItemController.openSettings = { [weak self] in self?.showSettings() }
         self.statusItemController = statusItemController
+        #if DEBUG
+        // Demo mode (README captures): no sampling and no lifecycle monitor; the store holds fixture data.
+        if DebugHooks.demoMode {
+            DebugSnapshotRenderer.applyDemo(to: store)
+            DebugHooks.log("demo mode: fixture data, no sampling")
+            presentWelcomeIfFirstLaunch()
+            runWindowScriptIfRequested()
+            return
+        }
+        #endif
         // Register BEFORE start so the first plan already reflects the override.
         for consumer in DebugHooks.demandOverride { sampler.register(consumer) }
         sampler.start(onBatch: Self.makeBatchSink(store: store), diagnostics: DebugHooks.diagnostics)
@@ -168,6 +178,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.showWindow(.section(section))
                     } else {
                         DebugHooks.log("window script unknown step")
+                    }
+                    // Demo mode: the window session a step just opened starts empty, so fill it again.
+                    if DebugHooks.demoMode, let store = self.store, WindowSection(rawValue: step) != nil
+                        || step == "last" || step.hasPrefix("processes:")
+                    {
+                        DebugSnapshotRenderer.applyDemo(to: store)
                     }
                 }
             }

@@ -57,6 +57,17 @@ nonisolated enum DebugHooks {
         #endif
     }
 
+    /// Demo mode (`METR_DEBUG_DEMO=1`): the sampler never starts and the store holds the README's neutral
+    /// fixture data, so the real menu bar item, panel and window can be captured without a real process,
+    /// volume or name (D-18). Release returns false and holds no environment name.
+    static var demoMode: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["METR_DEBUG_DEMO"] == "1"
+        #else
+        return false
+        #endif
+    }
+
     /// When set, the app renders the panel fixtures to PNG files in this directory and exits.
     static var renderDirectory: URL? {
         #if DEBUG

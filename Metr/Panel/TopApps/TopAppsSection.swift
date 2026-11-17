@@ -55,21 +55,53 @@ struct TopAppsSection: View {
             Text("Top Apps")
                 .font(.body.weight(.semibold))
             Spacer(minLength: 8)
-            Picker(
-                "Sort top apps by",
-                selection: Binding(get: { sort }, set: { sortRaw = $0.rawValue })
-            ) {
-                Text("CPU").tag(SortColumn.cpu)
-                Text("Memory").tag(SortColumn.memory)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
-            .fixedSize()
+            sortControl
         }
         .padding(.horizontal, 8)
         .padding(.top, 8)
         .padding(.bottom, 4)
+    }
+
+    /// The CPU / Memory sort control. The snapshot renderer cannot draw the AppKit segmented control
+    /// (`ImageRenderer` paints a "prohibited" badge), so while fixtures render a SwiftUI lookalike stands
+    /// in for it, which keeps the README panel shot clean. Compiled out of Release.
+    @ViewBuilder
+    private var sortControl: some View {
+        #if DEBUG
+        if DebugSnapshotRenderer.isRendering {
+            HStack(spacing: 0) {
+                ForEach([SortColumn.cpu, .memory], id: \.self) { column in
+                    Text(column == .cpu ? "CPU" : "Memory")
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 1)
+                        .background {
+                            if column == sort { RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.28)) }
+                        }
+                }
+            }
+            .padding(2)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.secondary.opacity(0.12)))
+        } else {
+            sortPicker
+        }
+        #else
+        sortPicker
+        #endif
+    }
+
+    private var sortPicker: some View {
+        Picker(
+            "Sort top apps by",
+            selection: Binding(get: { sort }, set: { sortRaw = $0.rawValue })
+        ) {
+            Text("CPU").tag(SortColumn.cpu)
+            Text("Memory").tag(SortColumn.memory)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
+        .fixedSize()
     }
 
     /// The partial state (E5): the other-users half of the process list cannot be read. One 20 pt line
