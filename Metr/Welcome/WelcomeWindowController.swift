@@ -23,8 +23,18 @@ final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
 
         let host = NSHostingController(rootView: WelcomeView(onDone: { [weak self] in self?.close() }))
-        host.sizingOptions = .preferredContentSize
+        // The window owns its size: a hosting controller that resizes the window from its own layout
+        // pass loops (an AppKit "update constraints" exception on macOS 26, which crashed the first
+        // launch; the Settings window carries the same rule). The view has a fixed width and an
+        // intrinsic height, so measure it once, for the taller of its two tips, and set the content size.
+        host.sizingOptions = []
         window.contentViewController = host
+        let width: CGFloat = 420
+        let height = [false, true].map { fallback in
+            NSHostingController(rootView: WelcomeView(onDone: {}, usedFallback: fallback))
+                .sizeThatFits(in: NSSize(width: width, height: .greatestFiniteMagnitude)).height
+        }.max() ?? 360
+        window.setContentSize(NSSize(width: width, height: height))
     }
 
     @available(*, unavailable)
