@@ -76,10 +76,12 @@ within() { # within APP TOP: |app - top| <= max(8 MiB, 3 % of top)
 }
 
 check_mem() { # check_mem NAME PID
+  # Runs inside $(...): its stdout is the result, so a failure message goes to stderr or it is swallowed
+  # (a preflight run once lost the reason of an intermittent failure this way).
   local app top
-  app="$(app_mem_bytes "$2" | median)" || fail "no $1 memory probe lines in $APP_LOG"
-  top="$(top_mem_bytes "$2" | median)" || fail "no $1 rows in $TOP_OUT"
-  within "$app" "$top" || fail "$1 memory app=$app top=$top differ by more than max(8 MiB, 3 %)"
+  app="$(app_mem_bytes "$2" | median)" || { echo "FAIL: no $1 memory probe lines in $APP_LOG" >&2; exit 1; }
+  top="$(top_mem_bytes "$2" | median)" || { echo "FAIL: no $1 rows in $TOP_OUT" >&2; exit 1; }
+  within "$app" "$top" || { echo "FAIL: $1 memory app=$app top=$top differ by more than max(8 MiB, 3 %)" >&2; exit 1; }
   echo "$app/$top"
 }
 
