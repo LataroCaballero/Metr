@@ -31,7 +31,10 @@ enum DebugSnapshotRenderer {
     /// Row ids of the apps the new fixtures put into a state: the app bundle path (`ProcessGroup.id`).
     private static let chromeID = "/Applications/Google Chrome.app"
     private static let textEditID = "/Applications/TextEdit.app"
-    private static let safariID = "/Applications/Safari.app"
+    /// Safari is a symlink at /Applications/Safari.app; libproc reports the resolved Cryptex path, and
+    /// `NSWorkspace` draws an alias badge on the symlink, so the fixtures use the resolved path.
+    private static let safariBundle = "/System/Cryptexes/App/System/Applications/Safari.app"
+    private static let safariID = safariBundle
     private static let mailID = "/System/Applications/Mail.app"
 
     private static let totalMemory: UInt64 = 17_179_869_184
@@ -202,7 +205,7 @@ enum DebugSnapshotRenderer {
                     ppid: 1, uid: me, path: path, command: command,
                     cpuPercent: cpu, footprintBytes: size * mib))
         }
-        add("/Applications/Safari.app/Contents/MacOS/Safari", "Safari", cpu: 6.8, mib: 610)
+        add("\(safariBundle)/Contents/MacOS/Safari", "Safari", cpu: 6.8, mib: 610)
         add("/System/Applications/Music.app/Contents/MacOS/Music", "Music", cpu: 3.9, mib: 380)
         add("/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal", "Terminal", cpu: 2.4, mib: 160)
         add("/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder", "Finder", cpu: 1.7, mib: 220)
@@ -404,7 +407,7 @@ enum DebugSnapshotRenderer {
         }
         add("/System/Applications/Mail.app/Contents/MacOS/Mail", "Mail", cpu: 4, mib: 520)
         add("/System/Applications/Music.app/Contents/MacOS/Music", "Music", cpu: 3, mib: 380)
-        add("/Applications/Safari.app/Contents/MacOS/Safari", "Safari", cpu: 9, mib: 610)
+        add("\(safariBundle)/Contents/MacOS/Safari", "Safari", cpu: 9, mib: 610)
         add("/usr/bin/swift-frontend", "swift-frontend", cpu: 140, mib: 1_400)
         add("/Applications/Xcode.app/Contents/MacOS/Xcode", "Xcode", cpu: 22, mib: 2_400)
         return samples
