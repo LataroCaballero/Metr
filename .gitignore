@@ -5,3 +5,4 @@ xcuserdata/
 *.xcresult
 .swiftpm/
 .DS_Store
+.claude/
