@@ -54,7 +54,10 @@ step_l10n_render() { bash scripts/verify/l10n-render.sh; }
 step_design() { bash scripts/verify/design.sh; }
 step_glyph_previews() { bash scripts/verify/glyph-previews.sh; }
 step_idle_cadence() {
-  bash scripts/verify/run-debug.sh 9 idle --expect 'tier=idle base=2\.0' --expect 'tick dt=' --min 4
+  # -MetrDidPresentWelcome YES keeps the first-launch Welcome window away and writes nothing to the
+  # owner's preferences domain (step 40 fails on a written domain).
+  bash scripts/verify/run-debug.sh 9 idle --expect 'tier=idle base=2\.0' --expect 'tick dt=' --min 4 \
+    --args -MetrDidPresentWelcome YES
   bash scripts/verify/tick-intervals.sh idle 2.0 0.3
 }
 step_settings_window() { bash scripts/verify/settings-window.sh; }
