@@ -19,7 +19,8 @@ import Testing
         #expect(GPUCollector.best([]) == nil)
     }
 
-    @Test func readsThisMac() throws {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["METR_CI"] != "1", "reads real hardware"))
+    func readsThisMac() throws {
         let reading = try #require(GPUCollector().sample().value)
         #expect((0.0...1.0).contains(reading.utilization))
         #expect((reading.coreCount ?? 0) >= 1)
