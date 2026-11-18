@@ -29,10 +29,32 @@
 # Known failure (budget.env KNOWN_ISSUE_WINDOW_CYCLES, owner decision C, 03-15): step 38 accepts
 # `window-cost.sh cycles` only as exit 3 with its `KNOWN-FAILURE cycles:` line, while the variable is set.
 # It is then listed as PREFLIGHT KNOWN-FAILURE and counted in known=; exit 0 prints a PREFLIGHT NOTE.
+#
+# Owner skip (04-12, owner decision 2026-11-17, single run): METR_PREFLIGHT_OWNER_SKIP=login-item makes step
+# 10 not run, because scripts/spikes/login-item.sh refuses while the owner's own /Applications/Metr.app
+# exists. Only the step named login-item is accepted (any other name fails with exit 2). The script itself
+# checks that the login-item sources are unchanged since OWNER_SKIP_BASE (git diff is empty) and fails when
+# they changed. The step is printed as a `PREFLIGHT SKIP <NN> login-item: ...` line and counted in skipped=;
+# it is never silent. The variable is read from the environment of one run and is never set by a script.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GH_REPO="LataroCaballero/Metr"
+
+# Owner skip support (see the header). The login-item code is these files; DebugHooks.swift also holds the
+# login-item hook names, so a diff of it counts only when a changed line mentions "login".
+OWNER_SKIP_ALLOWED=(login-item)
+OWNER_SKIP_BASE="681663b"
+LOGIN_ITEM_SOURCES=(
+  Metr/AppDelegate.swift
+  Metr/Settings/SettingsView.swift
+  Metr/Settings/LoginItemModel.swift
+  Metr/Settings/SettingsWindowController.swift
+  Metr/Debug/DebugSnapshotRenderer.swift
+  Packages/MetrKit/Sources/MetrCore/LoginItemProjection.swift
+  Packages/MetrKit/Tests/MetrCoreTests/LoginItemProjectionTests.swift
+  scripts/spikes/login-item.sh
+)
 
 # ---------------------------------------------------------------------------------------------------
 # The steps, in order. A step "foo-bar" is the function step_foo_bar below. Every function runs in its own
@@ -241,6 +263,32 @@ coverage "$REPO_ROOT" || exit 1
 print_plan
 echo "PREFLIGHT START tag=$TAG commit=$C branch=$BRANCH"
 
+# Owner skips: validated before the first gate. Unknown names and changed sources fail the run.
+OWNER_SKIPS=()
+if [ -n "${METR_PREFLIGHT_OWNER_SKIP:-}" ]; then
+  IFS=',' read -r -a requested <<<"$METR_PREFLIGHT_OWNER_SKIP"
+  for s in "${requested[@]}"; do
+    ok=0
+    for a in "${OWNER_SKIP_ALLOWED[@]}"; do if [ "$s" = "$a" ]; then ok=1; fi; done
+    [ "$ok" = 1 ] || { echo "FAIL: METR_PREFLIGHT_OWNER_SKIP names '$s'; only ${OWNER_SKIP_ALLOWED[*]} can be skipped" >&2; exit 2; }
+    OWNER_SKIPS+=("$s")
+  done
+  for s in "${OWNER_SKIPS[@]}"; do
+    git merge-base --is-ancestor "$OWNER_SKIP_BASE" HEAD \
+      || { echo "FAIL: owner skip $s: $OWNER_SKIP_BASE is not an ancestor of HEAD"; exit 1; }
+    if ! git diff --quiet "$OWNER_SKIP_BASE..HEAD" -- "${LOGIN_ITEM_SOURCES[@]}"; then
+      echo "FAIL: owner skip $s refused: the login-item sources changed since $OWNER_SKIP_BASE:"
+      git diff --stat "$OWNER_SKIP_BASE..HEAD" -- "${LOGIN_ITEM_SOURCES[@]}" | sed 's/^/  | /'
+      exit 1
+    fi
+    if git diff -U0 "$OWNER_SKIP_BASE..HEAD" -- Metr/Debug/DebugHooks.swift | grep -iE '^[+-].*login' >/dev/null; then
+      echo "FAIL: owner skip $s refused: a changed line in Metr/Debug/DebugHooks.swift mentions login"
+      exit 1
+    fi
+  done
+fi
+owner_skipped=0
+
 # shellcheck source=../env.sh
 source scripts/env.sh
 LOGDIR="$METR_LOGS/preflight"
@@ -261,6 +309,14 @@ for name in "${STEP_NAMES[@]}"; do
   log="$LOGDIR/$nn-$name.log"
   fn="step_${name//-/_}"
   echo "PREFLIGHT STEP $nn $name"
+  skip_owner=0
+  for s in ${OWNER_SKIPS[@]+"${OWNER_SKIPS[@]}"}; do if [ "$s" = "$name" ]; then skip_owner=1; fi; done
+  if [ "$skip_owner" = 1 ]; then
+    echo "PREFLIGHT SKIP $nn $name: owner decision 2026-11-17, /Applications/Metr.app is the owner's install; login-item code unchanged since $OWNER_SKIP_BASE (git diff $OWNER_SKIP_BASE..HEAD -- <login-item sources> is empty)"
+    echo "$nn $name SKIPPED (owner)" >>"$LOGDIR/timing.txt"
+    owner_skipped=$((owner_skipped + 1))
+    continue
+  fi
   t0="$(date +%s)"
   rc=0
   bash -c 'set -euo pipefail; cd "$1"; "$2"' _ "$REPO_ROOT" "$fn" >"$log" 2>&1 </dev/null || rc=$?
@@ -296,6 +352,6 @@ for name in "${STEP_NAMES[@]}"; do
   fi
 done
 
-[ "$gates" = "$PLAN_STEPS" ] || { echo "FAIL: ran $gates gates, the plan has $PLAN_STEPS"; exit 1; }
+[ $((gates + owner_skipped)) = "$PLAN_STEPS" ] || { echo "FAIL: ran $gates gates and skipped $owner_skipped, the plan has $PLAN_STEPS"; exit 1; }
 echo "PREFLIGHT ELAPSED seconds=$(( $(date +%s) - START_EPOCH ))"
-echo "RELEASE-PREFLIGHT OK tag=$TAG commit=$C gates=$gates skipped=${#SKIP_TABLE[@]} known=$known"
+echo "RELEASE-PREFLIGHT OK tag=$TAG commit=$C gates=$gates skipped=$(( ${#SKIP_TABLE[@]} + owner_skipped )) known=$known"
