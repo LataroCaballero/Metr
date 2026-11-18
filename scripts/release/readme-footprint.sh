@@ -8,9 +8,11 @@
 #   - the method line also gives the idle CPU as stored (three decimals), so a rounding tie is visible;
 #   - English: decimal point, `0.19%`; Spanish: decimal comma and a non-breaking space before % and MB.
 # The soak line is shown only when the soak's logged CDHash (SOAK START in $METR_LOGS/soak-24h.out) is the
-# CDHash of the build that was measured and the soak finished after it started; otherwise the block says the
-# 24 hour soak on this build is pending.
-# Prints "README-FOOTPRINT OK rows=3 soak=<ok|pending>" or "FAIL: <reason>" with exit 1.
+# CDHash of the build that was measured and the soak finished after it started. Otherwise, when budget.env
+# carries an explicit owner waiver for exactly this build (SOAK_WAIVED_CDHASH equal to FOOTPRINT_SHIPPED_CDHASH
+# and a non-empty SOAK_WAIVED_BY), the block says honestly that no 24 hour soak was run. With neither, the block
+# says the soak is pending (and readme.sh --strict fails). A waiver never carries over to another build.
+# Prints "README-FOOTPRINT OK rows=3 soak=<ok|waived|pending>" or "FAIL: <reason>" with exit 1.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -94,6 +96,10 @@ if starts:
             soak_values = (budget["MEASURED_SOAK_SLOPE_MB_PER_HOUR"], budget["MEASURED_SOAK_HOURS"],
                            budget["MEASURED_SOAK_LEAKS_DELTA"])
 
+if soak == "pending" and budget.get("SOAK_WAIVED_BY", "").strip() \
+        and budget.get("SOAK_WAIVED_CDHASH", "") == env["FOOTPRINT_SHIPPED_CDHASH"]:
+    soak = "waived"
+
 date = env["FOOTPRINT_AT"][:10]
 cdhash = env["FOOTPRINT_SHIPPED_CDHASH"][:12]
 cycles_n = int(env["WINDOW_CYCLES_N"])
@@ -137,6 +143,9 @@ def block(lang):
             sl = ("-" + num(slope[1:], 3, lang)) if slope.startswith("-") else num(slope, 3, lang)
             soak_line = (f"24 hour soak on this build: memory slope {sl} MB/hour "
                          f"over {num(hours, 1, lang)} hours, {leaks} leaks.")
+        elif soak == "waived":
+            soak_line = ("No 24 hour soak was run on this build: the maintainer chose to skip it for 1.0.0. "
+                         "The idle row above is a 300 second measurement, not a soak.")
         else:
             soak_line = "The 24 hour soak on this build is pending."
         issue = (f"Known issue: memory grows a little with each open and close of the window (an AppKit issue in the window "
@@ -155,6 +164,9 @@ def block(lang):
             sl = ("-" + num(slope[1:], 3, lang)) if slope.startswith("-") else num(slope, 3, lang)
             soak_line = (f"Prueba de 24 horas con esta compilación: pendiente de memoria {sl}{NBSP}MB/hora "
                          f"en {num(hours, 1, lang)} horas, {leaks} fugas.")
+        elif soak == "waived":
+            soak_line = ("No se hizo la prueba de 24 horas con esta compilación: el responsable del proyecto decidió "
+                         "omitirla en la 1.0.0. La fila en reposo es una medición de 300 segundos, no una prueba larga.")
         else:
             soak_line = "La prueba de 24 horas con esta compilación está pendiente."
         issue = (f"Problema conocido: la memoria crece un poco con cada apertura y cierre de la ventana (un problema de AppKit "

@@ -77,7 +77,7 @@ Measured on a MacBook Air (Apple M4), macOS 26.5.2, Metr 1.0.0 (build 167, CDHas
 
 Method: `scripts/perf/` measures Metr's own process with `proc_pid_rusage`. Idle is 300 seconds on the release build; panel and window are 60 seconds on an optimized build with measurement hooks. Panel open includes Metr's streamed `top` child: Metr 0.91% plus top 4.47%. The idle row is held to the project budget (0.25% CPU, 3.0 wakeups/s); it measured 0.220% before rounding.
 
-The 24 hour soak on this build is pending.
+No 24 hour soak was run on this build: the maintainer chose to skip it for 1.0.0. The idle row above is a 300 second measurement, not a soak.
 
 Known issue: memory grows a little with each open and close of the window (an AppKit issue in the window chrome). Measured: 2.1 MB over 10 open and close cycles, not counting the first, which loads the window's frameworks.
 <!-- footprint:end -->

@@ -19,6 +19,9 @@
 #              scripts/release/readme-footprint.sh does (English point, Spanish comma), computed again here.
 # --strict (run before publishing, 04-13): all 14 images exist, the soak line is not pending and the version
 # in the machine line equals the project's MARKETING_VERSION (an rc table cannot pass as a 1.0.0 table).
+# The soak line must be present and be one of two sentences: the measured soak, or the explicit waiver. The
+# waiver sentence passes only while budget.env carries SOAK_WAIVED_CDHASH equal to the footprint's
+# FOOTPRINT_SHIPPED_CDHASH and a non-empty SOAK_WAIVED_BY; a missing soak line still fails.
 # Prints README PENDING lines, then
 #   README OK sections=11 pictures=4 images=<existing> pending=<missing> numbers=<n>   (strict appends " strict=1")
 set -euo pipefail
@@ -180,7 +183,18 @@ def block(text, name):
         fail(f"{name} needs exactly one footprint:start and footprint:end")
     return text.split("<!-- footprint:start -->", 1)[1].split("<!-- footprint:end -->", 1)[0]
 
+budget = {}
+try:
+    for line in open("scripts/perf/budget.env", encoding="utf-8"):
+        line = line.rstrip("\n")
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            budget[k] = v
+except OSError:
+    fail("scripts/perf/budget.env is missing")
+
 numbers = 0
+waived = 0
 ROWS = [("IDLE", {"en": "Idle", "es": "En reposo"}),
         ("PANEL", {"en": "Panel open", "es": "Panel abierto"}),
         ("WINDOW", {"en": "Window open", "es": "Ventana abierta"})]
@@ -224,8 +238,16 @@ for name, text, lang in (("README.md", en, "en"), ("README.es.md", es, "es")):
             fail(f"--strict: {name} footprint is for Metr {version.group(1)}, the project is {marketing}")
         if re.search(r"pending|pendiente", body, re.I):
             fail(f"--strict: {name} footprint still has a pending line (the 24 hour soak on this build)")
+        measured_line = ("24 hour soak on this build:", "Prueba de 24 horas con esta compilación:")[lang == "es"]
+        waived_line = ("No 24 hour soak was run on this build", "No se hizo la prueba de 24 horas con esta compilación")[lang == "es"]
+        if waived_line in body:
+            if not budget.get("SOAK_WAIVED_BY", "").strip() or budget.get("SOAK_WAIVED_CDHASH", "") != env["FOOTPRINT_SHIPPED_CDHASH"]:
+                fail(f"--strict: {name} says the soak was waived, but budget.env has no owner waiver for CDHash {env['FOOTPRINT_SHIPPED_CDHASH']}")
+            waived += 1
+        elif measured_line not in body:
+            fail(f"--strict: {name} footprint has no soak line (neither a measured soak nor an explicit waiver)")
 
 sections_n = s_en
-tail = " strict=1" if strict else ""
+tail = (" strict=1" + (" soak=waived" if waived else "")) if strict else ""
 print(f"README OK sections={sections_n} pictures=4 images={existing} pending={pending} numbers={numbers}{tail}")
 PY
