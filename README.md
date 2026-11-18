@@ -69,17 +69,17 @@ Watch it yourself with `nettop` or a firewall such as Little Snitch, or run the 
 <!-- footprint:start -->
 | State | CPU (% of one core) | Memory | Wakeups/s |
 |---|---|---|---|
-| Idle (panel closed), release build | 0.18% | 14.7 MB | 1.3 |
-| Panel open, optimized build with measurement hooks | 5.00% | 16.1 MB | 2.9 |
-| Window open, optimized build with measurement hooks | 4.55% | 82.6 MB | 16.7 |
+| Idle (panel closed), release build | 0.22% | 14.9 MB | 1.9 |
+| Panel open, optimized build with measurement hooks | 5.38% | 16.7 MB | 3.8 |
+| Window open, optimized build with measurement hooks | 3.67% | 83.6 MB | 7.8 |
 
-Measured on a MacBook Air (Apple M4), macOS 26.5.2, Metr 1.0.0-rc.1 (build 151, CDHash 863b525b9423), 2026-11-17.
+Measured on a MacBook Air (Apple M4), macOS 26.5.2, Metr 1.0.0 (build 167, CDHash ee7456086402), 2026-11-18.
 
-Method: `scripts/perf/` measures Metr's own process with `proc_pid_rusage`. Idle is 300 seconds on the release build; panel and window are 60 seconds on an optimized build with measurement hooks. Panel open includes Metr's streamed `top` child: Metr 0.80% plus top 4.20%. The idle row is held to the project budget (0.25% CPU, 3.0 wakeups/s); it measured 0.175% before rounding.
+Method: `scripts/perf/` measures Metr's own process with `proc_pid_rusage`. Idle is 300 seconds on the release build; panel and window are 60 seconds on an optimized build with measurement hooks. Panel open includes Metr's streamed `top` child: Metr 0.91% plus top 4.47%. The idle row is held to the project budget (0.25% CPU, 3.0 wakeups/s); it measured 0.220% before rounding.
 
 The 24 hour soak on this build is pending.
 
-Known issue: memory grows a little with each open and close of the window (an AppKit issue in the window chrome). Measured: 3.8 MB over 10 open and close cycles, not counting the first, which loads the window's frameworks.
+Known issue: memory grows a little with each open and close of the window (an AppKit issue in the window chrome). Measured: 2.1 MB over 10 open and close cycles, not counting the first, which loads the window's frameworks.
 <!-- footprint:end -->
 
 ## Requirements

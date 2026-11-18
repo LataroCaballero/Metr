@@ -69,17 +69,17 @@ Compruébalo tú mismo con `nettop` o un cortafuegos como Little Snitch, o ejecu
 <!-- footprint:start -->
 | Estado | CPU (% de un núcleo) | Memoria | Activaciones/s |
 |---|---|---|---|
-| En reposo (panel cerrado), compilación de lanzamiento | 0,18 % | 14,7 MB | 1,3 |
-| Panel abierto, compilación optimizada con ganchos de medición | 5,00 % | 16,1 MB | 2,9 |
-| Ventana abierta, compilación optimizada con ganchos de medición | 4,55 % | 82,6 MB | 16,7 |
+| En reposo (panel cerrado), compilación de lanzamiento | 0,22 % | 14,9 MB | 1,9 |
+| Panel abierto, compilación optimizada con ganchos de medición | 5,38 % | 16,7 MB | 3,8 |
+| Ventana abierta, compilación optimizada con ganchos de medición | 3,67 % | 83,6 MB | 7,8 |
 
-Medido en un MacBook Air (Apple M4), macOS 26.5.2, Metr 1.0.0-rc.1 (compilación 151, CDHash 863b525b9423), 2026-11-17.
+Medido en un MacBook Air (Apple M4), macOS 26.5.2, Metr 1.0.0 (compilación 167, CDHash ee7456086402), 2026-11-18.
 
-Método: `scripts/perf/` mide el proceso de Metr con `proc_pid_rusage`. En reposo son 300 segundos con la compilación de lanzamiento; panel y ventana son 60 segundos con una compilación optimizada con ganchos de medición. Panel abierto incluye el proceso hijo `top` de Metr: Metr 0,80 % más top 4,20 %. La fila en reposo cumple el presupuesto del proyecto (0,25 % de CPU, 3,0 activaciones/s); midió 0,175 % antes de redondear.
+Método: `scripts/perf/` mide el proceso de Metr con `proc_pid_rusage`. En reposo son 300 segundos con la compilación de lanzamiento; panel y ventana son 60 segundos con una compilación optimizada con ganchos de medición. Panel abierto incluye el proceso hijo `top` de Metr: Metr 0,91 % más top 4,47 %. La fila en reposo cumple el presupuesto del proyecto (0,25 % de CPU, 3,0 activaciones/s); midió 0,220 % antes de redondear.
 
 La prueba de 24 horas con esta compilación está pendiente.
 
-Problema conocido: la memoria crece un poco con cada apertura y cierre de la ventana (un problema de AppKit en el marco de la ventana). Medido: 3,8 MB en 10 ciclos de apertura y cierre, sin contar el primero, que carga los frameworks de la ventana.
+Problema conocido: la memoria crece un poco con cada apertura y cierre de la ventana (un problema de AppKit en el marco de la ventana). Medido: 2,1 MB en 10 ciclos de apertura y cierre, sin contar el primero, que carga los frameworks de la ventana.
 <!-- footprint:end -->
 
 ## Requisitos
