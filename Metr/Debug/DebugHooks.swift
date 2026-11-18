@@ -116,6 +116,17 @@ nonisolated enum DebugHooks {
         #endif
     }
 
+    /// How many churning refreshes the Processes table drives through itself (the race stress for the
+    /// outline host, `scripts/verify/table-stress.sh`). Zero or unset: none. Release returns zero and
+    /// holds no environment name.
+    static var tableStressRounds: Int {
+        #if DEBUG
+        return Int(ProcessInfo.processInfo.environment["METR_DEBUG_TABLE_STRESS"] ?? "") ?? 0
+        #else
+        return 0
+        #endif
+    }
+
     /// When true, the window shows the DEBUG chrome probe controls on Processes (a toolbar search
     /// field and a toolbar menu) and logs what the AppKit host bridged. Release: false, no name.
     static var chromeProbeEnabled: Bool {

@@ -2,7 +2,7 @@
 # Usage: scripts/release/preflight-release.sh TAG                  the releasable-commit gate (TAG like v1.0.0)
 #        scripts/release/preflight-release.sh --list [--root DIR]   only the coverage check (seconds)
 #
-# One command that runs every unattended Phase 1-4 gate on the current commit, as the 40 steps named in
+# One command that runs every unattended Phase 1-4 gate on the current commit, as the 41 steps named in
 # STEP_NAMES below, in that order, and prints as its LAST line
 #   RELEASE-PREFLIGHT OK tag=<t> commit=<40-hex HEAD> gates=<n> skipped=<n> known=<n>
 # only when all of them pass. Nothing is committed, tagged or pushed by it.
@@ -26,7 +26,7 @@
 # "FAIL: listed but missing <path>". The scripts a step runs are read from the step's own function body,
 # so a new script can never be silently left out.
 #
-# Known failure (budget.env KNOWN_ISSUE_WINDOW_CYCLES, owner decision C, 03-15): step 37 accepts
+# Known failure (budget.env KNOWN_ISSUE_WINDOW_CYCLES, owner decision C, 03-15): step 38 accepts
 # `window-cost.sh cycles` only as exit 3 with its `KNOWN-FAILURE cycles:` line, while the variable is set.
 # It is then listed as PREFLIGHT KNOWN-FAILURE and counted in known=; exit 0 prints a PREFLIGHT NOTE.
 set -euo pipefail
@@ -43,7 +43,7 @@ STEP_NAMES=(
   move-offer login-item window-deeplink cpu-vs-top memory-vs-system procs-vs-top proc-diskio disk-live
   diskio-live volumes-vs-diskutil gpu-vs-ioreg net-vs-netstat no-network-self-test public-content
   build-release-app bundle status-item no-network-static l10n build-release-dist dmg build-relhooks
-  no-network-runtime measure panel-cost window-cost-cpu window-cost-processes window-cost-after-close
+  no-network-runtime table-stress measure panel-cost window-cost-cpu window-cost-processes window-cost-after-close
   window-cost-cycles soak-quick readme ci-and-defaults
 )
 
@@ -55,7 +55,7 @@ step_design() { bash scripts/verify/design.sh; }
 step_glyph_previews() { bash scripts/verify/glyph-previews.sh; }
 step_idle_cadence() {
   # -MetrDidPresentWelcome YES keeps the first-launch Welcome window away and writes nothing to the
-  # owner's preferences domain (step 40 fails on a written domain).
+  # owner's preferences domain (step 41 fails on a written domain).
   bash scripts/verify/run-debug.sh 9 idle --expect 'tier=idle base=2\.0' --expect 'tick dt=' --min 4 \
     --args -MetrDidPresentWelcome YES
   bash scripts/verify/tick-intervals.sh idle 2.0 0.3
@@ -98,6 +98,8 @@ step_dmg() {
 }
 step_build_relhooks() { bash scripts/build.sh relhooks; }
 step_no_network_runtime() { bash scripts/verify/no-network.sh --runtime; }
+# The Processes table's refresh race (04-12): 120 churning refreshes, the outline checked after each.
+step_table_stress() { bash scripts/verify/table-stress.sh 120 1; }
 step_measure() { bash scripts/perf/measure.sh 300; }
 step_panel_cost() { bash scripts/perf/panel-cost.sh 15; }
 step_window_cost_cpu() { bash scripts/perf/window-cost.sh cpu 15; }

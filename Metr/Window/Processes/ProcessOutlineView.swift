@@ -78,6 +78,14 @@ struct ProcessOutlineView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         let coordinator = context.coordinator
         coordinator.text = text
+        #if DEBUG
+        // The race stress (scripts/verify/table-stress.sh) owns the outline while it runs, so the live
+        // rows do not interleave with the churning ones it feeds.
+        if DebugHooks.tableStressRounds > 0 {
+            coordinator.startStressOnce(rounds: DebugHooks.tableStressRounds)
+            if coordinator.isStressing { return }
+        }
+        #endif
         coordinator.apply(rows: rows, active: active, ascending: activeAscending)
     }
 
@@ -146,6 +154,26 @@ struct ProcessOutlineView: NSViewRepresentable {
 
         // MARK: Applying a refresh
 
+        /// The rows of one refresh as nodes, before the data source serves them.
+        private struct Plan {
+            var roots: [Node]
+            var children: [(node: Node, children: [Node])]
+            var nodes: [String: Node]
+        }
+
+        /// Makes the data source answer with the refresh's rows. Called only when the outline is about to
+        /// load them (a reload) or already has them (an animated update, a refresh with the same structure).
+        private func publish(_ plan: Plan) {
+            roots = plan.roots
+            for entry in plan.children { entry.node.children = entry.children }
+            nodes = plan.nodes
+            // A row that stopped being a group (a helper now, or its helpers gone) has none to serve.
+            let rootIDs = Set(plan.roots.map(\.id))
+            for node in plan.nodes.values where !node.children.isEmpty && !rootIDs.contains(node.id) {
+                node.children = []
+            }
+        }
+
         func apply(rows: [ProcessTableRow], active: ProcessTableColumn, ascending: Bool) {
             guard let outline, let scrollView else { return }
             isApplying = true
@@ -169,17 +197,22 @@ struct ProcessOutlineView: NSViewRepresentable {
                 return node
             }
 
+            // What the outline will hold once this refresh is applied. NOTHING of it reaches the data source
+            // yet: until the outline is told, `roots` and every node's `children` stay what the outline has
+            // loaded, because AppKit asks the data source for those lists at moments of its own choosing
+            // (`row(forItem:)` on an item it has not located walks the rows and loads them lazily, with the
+            // counts it cached). A list that already holds the new rows made it ask for an index past the end.
             var newRoots: [Node] = []
+            var newChildren: [(node: Node, children: [Node])] = []
             var newStructure: [Structure] = []
             newRoots.reserveCapacity(rows.count)
             for row in rows {
                 let node = resolve(row)
-                node.children = row.children.map(resolve)
+                newChildren.append((node, row.children.map(resolve)))
                 newRoots.append(node)
                 newStructure.append(Structure(id: row.id, children: row.children.map(\.id)))
             }
-            nodes = live
-            roots = newRoots
+            let plan = Plan(roots: newRoots, children: newChildren, nodes: live)
 
             // The header indicator follows the effective sort, not only the user's choice.
             if outline.sortDescriptors.first?.key != active.rawValue
@@ -202,13 +235,14 @@ struct ProcessOutlineView: NSViewRepresentable {
                 // under Reduce Motion). A new sort, a first build or a big upheaval reloads at once.
                 let animated =
                     !activeChanged && !directionChanged && !oldStructure.isEmpty
-                    && animate(from: oldStructure, to: newStructure, dirty: dirty, in: outline)
+                    && animate(from: oldStructure, to: newStructure, dirty: dirty, plan: plan, in: outline)
                 if animated {
                     reconcileExpansion(in: outline)
                 } else {
                     // Reload once, then put expansion, selection and the scroll offset back so the
                     // user's place never changes.
                     let origin = clip.bounds.origin
+                    publish(plan)
                     outline.reloadData()
                     reconcileExpansion(in: outline)
                     let target = clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin
@@ -216,6 +250,8 @@ struct ProcessOutlineView: NSViewRepresentable {
                     scrollView.reflectScrolledClipView(clip)
                 }
             } else {
+                // The same groups with the same helpers: the same nodes, nothing for the outline to learn.
+                publish(plan)
                 reconcileExpansion(in: outline)
                 if activeChanged {
                     // The emphasised column changed (the first CPU reading): redraw what is on screen.
@@ -325,7 +361,9 @@ struct ProcessOutlineView: NSViewRepresentable {
         /// smooth timing, so a row keeps its identity (selection, expansion, scroll) while it moves.
         /// Returns false, having changed nothing, when the change is not worth animating: Reduce Motion,
         /// or more than `maximumAnimatedOperations` rows involved (a search, a big re-rank).
-        private func animate(from old: [Structure], to new: [Structure], dirty: [Node], in outline: NSOutlineView) -> Bool {
+        private func animate(
+            from old: [Structure], to new: [Structure], dirty: [Node], plan: Plan, in outline: NSOutlineView
+        ) -> Bool {
             guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return false }
             // A second change while the first is still moving (a freeze released right at a reading)
             // reloads instead of stacking batches on a table that is mid-animation.
@@ -348,36 +386,251 @@ struct ProcessOutlineView: NSViewRepresentable {
             let total = rootDiff.operationCount + childDiffs.reduce(0) { $0 + $1.diff.operationCount } + reloaded.count
             guard total <= Self.maximumAnimatedOperations else { return false }
 
-            // Numbers first, at the rows' current places, so a moving row already shows fresh values.
+            // Numbers first, at the rows' current places, so a moving row already shows fresh values. The
+            // data source still holds exactly what the outline holds, so asking it where a row is is safe.
             redrawVisible(dirty, in: outline)
 
-            func run(_ diff: RowDiff, parent: Node?) {
-                if !diff.removed.isEmpty {
-                    outline.removeItems(at: diff.removed, inParent: parent, withAnimation: .effectFade)
-                }
-                for move in diff.moves {
-                    outline.moveItem(at: move.from, inParent: parent, to: move.to, inParent: parent)
-                }
-                if !diff.inserted.isEmpty {
-                    outline.insertItems(at: diff.inserted, inParent: parent, withAnimation: .effectFade)
-                }
+            // From here the data source follows the outline one operation at a time: each list is changed
+            // just before the matching call, so at every moment the outline may ask (inside the batch, or
+            // while it lays out) the data source and the outline's own counts agree.
+            let newChildren = Dictionary(
+                plan.children.map { ($0.node.id, $0.children) }, uniquingKeysWith: { first, _ in first })
+            // A root the outline does not hold yet (a new row, or a helper that became a top-level row) has
+            // nothing cached: it learns its helpers now.
+            let oldRootIDs = Set(old.map(\.id))
+            for entry in plan.children where !oldRootIDs.contains(entry.node.id) { entry.node.children = entry.children }
+            var operations: [(parent: Node?, diff: RowDiff, final: [Node])] = [(nil, rootDiff, plan.roots)]
+            for (parent, diff) in childDiffs { operations.append((parent, diff, newChildren[parent.id] ?? [])) }
+            func served(_ parent: Node?) -> [Node] { parent?.children ?? roots }
+            func serve(_ list: [Node], _ parent: Node?) {
+                if let parent { parent.children = list } else { roots = list }
             }
+
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = Self.animationDuration
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 context.allowsImplicitAnimation = true
                 outline.beginUpdates()
-                run(rootDiff, parent: nil)
-                for (parent, diff) in childDiffs { run(diff, parent: parent) }
+                // Every removal first, then every move, then every insertion, so a row that changes
+                // place between a group and the top level is gone from the old one before it appears
+                // in the new one.
+                for operation in operations where !operation.diff.removed.isEmpty {
+                    var list = served(operation.parent)
+                    for index in operation.diff.removed.reversed() { list.remove(at: index) }
+                    serve(list, operation.parent)
+                    outline.removeItems(at: operation.diff.removed, inParent: operation.parent, withAnimation: .effectFade)
+                }
+                for operation in operations {
+                    for move in operation.diff.moves {
+                        var list = served(operation.parent)
+                        list.insert(list.remove(at: move.from), at: move.to)
+                        serve(list, operation.parent)
+                        outline.moveItem(
+                            at: move.from, inParent: operation.parent, to: move.to, inParent: operation.parent)
+                    }
+                }
+                for operation in operations where !operation.diff.inserted.isEmpty {
+                    var list = served(operation.parent)
+                    for index in operation.diff.inserted { list.insert(operation.final[index], at: index) }
+                    serve(list, operation.parent)
+                    outline.insertItems(at: operation.diff.inserted, inParent: operation.parent, withAnimation: .effectFade)
+                }
                 outline.endUpdates()
             }
             animationEnd = ProcessInfo.processInfo.systemUptime + Self.animationDuration + 0.1
-            for node in reloaded { outline.reloadItem(node, reloadChildren: true) }
+            // The groups that only reload: their new helpers are served right before the outline is told.
+            for node in reloaded {
+                node.children = newChildren[node.id] ?? []
+                outline.reloadItem(node, reloadChildren: true)
+            }
+            publish(plan)
             #if DEBUG
             logAnimation(rootDiff: rootDiff, helperOperations: childDiffs.reduce(0) { $0 + $1.diff.operationCount })
             #endif
             return true
         }
+
+        #if DEBUG
+        // MARK: Race stress (DEBUG)
+
+        /// What the stress drives: the round it is on, how many there are, its seeded generator and how many
+        /// times the rows the outline showed differed from the rows it was given.
+        private(set) var isStressing = false
+        private var stressStarted = false
+        private var stressRound = 0
+        private var stressRounds = 0
+        private var stressMismatches = 0
+        private var stressExpected: [String] = []
+        private var stressGenerator = StressGenerator(seed: 0x5EED_CAFE)
+
+        private struct StressGenerator: RandomNumberGenerator {
+            var state: UInt64
+            init(seed: UInt64) { state = seed }
+            mutating func next() -> UInt64 {
+                state &+= 0x9E37_79B9_7F4A_7C15
+                var z = state
+                z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+                z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+                return z ^ (z >> 31)
+            }
+        }
+
+        /// Starts the stress once per host: `rounds` refreshes of churning groups and helpers (groups that
+        /// come, go and move, helpers that appear and vanish, groups that open and close), spaced so that
+        /// about two thirds of them land after the previous animation and take the animated path.
+        func startStressOnce(rounds: Int) {
+            guard !stressStarted else { return }
+            stressStarted = true
+            isStressing = true
+            stressRounds = rounds
+            DebugHooks.log("table stress start rounds=\(rounds)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                MainActor.assumeIsolated { self?.stressStep() }
+            }
+        }
+
+        private func stressStep() {
+            guard let outline else { return }
+            // What the previous round left on screen must be what it was given.
+            if stressRound > 0 {
+                var actual: [String] = []
+                for index in 0..<outline.numberOfRows {
+                    if let node = outline.item(atRow: index) as? Node { actual.append(node.id) }
+                }
+                if actual != stressExpected { stressMismatches += 1 }
+            }
+            guard stressRound < stressRounds else {
+                isStressing = false
+                DebugHooks.log("table stress done rounds=\(stressRound) mismatches=\(stressMismatches)")
+                return
+            }
+            stressRound += 1
+            if stressRound <= 3 {
+                stressScripted(round: stressRound)
+                return
+            }
+            let rows = stressNextRows()
+            // About half the groups with helpers are open, a few of them flipping every round.
+            var open = model.expanded.intersection(rows.map(\.id))
+            for row in rows where !row.children.isEmpty {
+                let flip = Int.random(in: 0..<10, using: &stressGenerator)
+                if !stressSeen.contains(row.id) { if flip < 5 { open.insert(row.id) } } else if flip == 0 {
+                    if open.contains(row.id) { open.remove(row.id) } else { open.insert(row.id) }
+                }
+                stressSeen.insert(row.id)
+            }
+            model.expanded = open
+            stressExpected = rows.flatMap { row in
+                [row.id] + (open.contains(row.id) ? row.children.map(\.id) : [])
+            }
+            // Every 8th round changes the emphasised column, which reloads instead of animating; the
+            // seven rounds after it then update an outline whose rows are all unloaded again.
+            let column: ProcessTableColumn = (stressRound / 8) % 2 == 0 ? .cpu : .memory
+            apply(rows: rows, active: column, ascending: false)
+            let pick = Int.random(in: 0..<10, using: &stressGenerator)
+            let delay = pick < 7 ? 0.5 : (pick < 9 ? 0.1 : 0.0)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                MainActor.assumeIsolated { self?.stressStep() }
+            }
+        }
+
+        /// The exact sequence that made AppKit ask the data source for a child index the shorter list no
+        /// longer has: a big outline, a reload that leaves its rows unloaded, then a refresh with fewer
+        /// groups in which only a helper of a collapsed group changed (AppKit has to search every group to
+        /// find that helper). Three rounds, then the random ones carry on from the same groups.
+        private func stressScripted(round: Int) {
+            stressGroups = (0..<300).map { ($0, $0 == 100 ? [0, 1, 2] : []) }
+            if round >= 3 { stressGroups.removeLast(10) }
+            stressCPUs = [:]
+            let rows = stressGroups.map { entry -> ProcessTableRow in
+                func make(_ id: String, helper: Bool, cpu: Double, children: [ProcessTableRow]) -> ProcessTableRow {
+                    ProcessTableRow(
+                        id: id, name: id, help: id, icon: NSImage(size: NSSize(width: 1, height: 1)), kind: .own, pid: 1,
+                        isHelper: helper, isOwn: true, cpuPercent: cpu, footprintBytes: 1_000_000,
+                        diskReadPerSec: nil, diskWritePerSec: nil, helperCount: children.count, availability: .allowed,
+                        actionState: .rest, children: children)
+                }
+                let kids = entry.helpers.map {
+                    make("g\(entry.group).h\($0)", helper: true, cpu: round >= 3 ? 77 : 5, children: [])
+                }
+                return make("g\(entry.group)", helper: false, cpu: 1, children: kids)
+            }
+            model.expanded = []
+            stressSeen = Set(rows.map(\.id))
+            stressExpected = rows.map(\.id)
+            // Rounds 1 and 2 build the outline and reload it (a new emphasised column); 3 refreshes it.
+            apply(rows: rows, active: round == 1 ? .cpu : .memory, ascending: false)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                MainActor.assumeIsolated { self?.stressStep() }
+            }
+        }
+
+        /// The groups as the stress keeps them: id number and the numbers of its helpers, in order.
+        private var stressGroups: [(group: Int, helpers: [Int])] = []
+        private var stressSeen: Set<String> = []
+        private var stressCPUs: [String: Double] = [:]
+
+        /// A row's reading, changed on a third of the refreshes so that only some rows are dirty.
+        private func stressCPU(_ id: String) -> Double {
+            if let known = stressCPUs[id], Int.random(in: 0..<3, using: &stressGenerator) != 0 { return known }
+            let fresh = Double.random(in: 0..<100, using: &stressGenerator)
+            stressCPUs[id] = fresh
+            return fresh
+        }
+
+        /// One churn step on the kept groups, small like a real refresh: a few groups come, go and move,
+        /// a few groups gain, lose or reorder helpers (some going from none to some and back).
+        private func stressNextRows() -> [ProcessTableRow] {
+            func helpers(_ gen: inout StressGenerator) -> [Int] {
+                let count = Int.random(in: 0..<10, using: &gen) < 8 ? 0 : Int.random(in: 1...8, using: &gen)
+                return Array((0..<8).shuffled(using: &gen).prefix(count))
+            }
+            if stressGroups.isEmpty {
+                stressGroups = (0..<450).map { ($0, helpers(&stressGenerator)) }
+            } else {
+                for _ in 0..<Int.random(in: 0...8, using: &stressGenerator) where stressGroups.count > 300 {
+                    stressGroups.remove(at: Int.random(in: 0..<stressGroups.count, using: &stressGenerator))
+                }
+                let unused = Set(0..<700).subtracting(stressGroups.map(\.group)).sorted()
+                for group in unused.shuffled(using: &stressGenerator).prefix(Int.random(in: 0...5, using: &stressGenerator)) {
+                    stressGroups.insert(
+                        (group, helpers(&stressGenerator)), at: Int.random(in: 0...stressGroups.count, using: &stressGenerator))
+                    stressSeen.remove("g\(group)")
+                }
+                for _ in 0..<Int.random(in: 0...3, using: &stressGenerator) {
+                    let item = stressGroups.remove(at: Int.random(in: 0..<stressGroups.count, using: &stressGenerator))
+                    stressGroups.insert(item, at: Int.random(in: 0...stressGroups.count, using: &stressGenerator))
+                }
+                for _ in 0..<Int.random(in: 0...4, using: &stressGenerator) {
+                    let at = Int.random(in: 0..<stressGroups.count, using: &stressGenerator)
+                    var list = stressGroups[at].helpers
+                    switch Int.random(in: 0..<4, using: &stressGenerator) {
+                    case 0:
+                        if let spare = Set(0..<8).subtracting(list).randomElement(using: &stressGenerator) { list.append(spare) }
+                    case 1:
+                        if !list.isEmpty { list.remove(at: Int.random(in: 0..<list.count, using: &stressGenerator)) }
+                    case 2: list.shuffle(using: &stressGenerator)
+                    default: list = helpers(&stressGenerator)
+                    }
+                    stressGroups[at].helpers = list
+                }
+            }
+            let icon = NSImage(size: NSSize(width: 1, height: 1))
+            func row(_ id: String, helper: Bool, children: [ProcessTableRow]) -> ProcessTableRow {
+                ProcessTableRow(
+                    id: id, name: id, help: id, icon: icon, kind: .own, pid: 1, isHelper: helper, isOwn: true,
+                    cpuPercent: stressCPU(id),
+                    footprintBytes: UInt64.random(in: 1_000_000..<9_000_000_000, using: &stressGenerator),
+                    diskReadPerSec: nil, diskWritePerSec: nil, helperCount: children.count, availability: .allowed,
+                    actionState: .rest, children: children)
+            }
+            return stressGroups.map { entry in
+                row(
+                    "g\(entry.group)", helper: false,
+                    children: entry.helpers.map { row("g\(entry.group).h\($0)", helper: true, children: []) })
+            }
+        }
+        #endif
 
         /// When the last animated batch is done moving (`systemUptime`).
         private var animationEnd: TimeInterval = 0
@@ -437,8 +690,22 @@ struct ProcessOutlineView: NSViewRepresentable {
         }
 
         func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
-            guard let node = item as? Node else { return roots[index] }
-            return node.children[index]
+            // The lists are kept equal to what the outline holds (see `apply`), so an index past the end
+            // is not expected. If one ever comes, a row that draws nothing is better than a crash in a
+            // monitor the user keeps open; the DEBUG log and the stress script treat it as a failure.
+            let list: [Node]
+            if item == nil {
+                list = roots
+            } else {
+                list = (item as? Node)?.children ?? []
+            }
+            guard list.indices.contains(index) else {
+                #if DEBUG
+                DebugHooks.log("table datasource out-of-range index=\(index) count=\(list.count)")
+                #endif
+                return NSNull()
+            }
+            return list[index]
         }
 
         /// Only a group with helpers is expandable; a leaf never shows a disclosure triangle.
