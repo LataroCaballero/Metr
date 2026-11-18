@@ -173,9 +173,10 @@ struct QuitIntegrationTests {
         let entries = try #require(sources.listAll())
         let daemon = try #require(
             entries.first {
-                // The sampler tests start top children in parallel. top is setuid root but keeps the
-                // user's real uid, so it is signalable and is not a daemon.
-                $0.uid == 0 && $0.identity.pid > 1 && $0.command != "top"
+                // The sampler tests start top and ps children in parallel. Both are setuid root but keep
+                // the user's real uid, so they are signalable and are not daemons. A real daemon is a
+                // child of launchd (ppid 1), which no short-lived helper of the tests ever is.
+                $0.uid == 0 && $0.identity.pid > 1 && $0.ppid == 1 && $0.command != "top" && $0.command != "ps"
                     && !(sources.path($0.identity.pid).map { ProcessClassifier.protectedPaths.contains($0) } ?? false)
                     && ProcessLookup.live($0.identity.pid) != nil
             })
